@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {LibCrottoGuard} from "../libraries/LibCrottoGuard.sol";
+import {LibRewardAccounting} from "../libraries/LibRewardAccounting.sol";
 import {LibGovernanceStorage} from "../libraries/storage/LibGovernanceStorage.sol";
 
 /// @notice Shared security modifiers and scoped RewardNFT transfer helpers for Crotto facets.
@@ -37,6 +38,29 @@ abstract contract CrottoFacet {
     // forge-lint: disable-next-line(mixed-case-function)
     function _finishRewardNFTTransfer() internal {
         LibCrottoGuard.finishRewardNFTTransfer();
+    }
+
+    function _accrueNftWethRewards(uint256 amount) internal returns (uint256 indexRay) {
+        return LibRewardAccounting.accrueWeth(amount);
+    }
+
+    function _accrueNftTokenRewards(uint256 amount) internal returns (uint256 indexRay) {
+        return LibRewardAccounting.accrueToken(amount);
+    }
+
+    function _settleNftRewards(uint256 tokenId) internal returns (uint256 wethAmount, uint256 tokenAmount) {
+        return LibRewardAccounting.settle(tokenId);
+    }
+
+    function _setNftRewardWeight(uint256 tokenId, uint8 tier, uint256 newWeight)
+        internal
+        returns (uint256 previousWeight)
+    {
+        return LibRewardAccounting.setPositionWeight(tokenId, tier, newWeight);
+    }
+
+    function _checkpointNftRewards(uint256 tokenId) internal {
+        LibRewardAccounting.checkpointPosition(tokenId);
     }
 
     function _enforceNotPaused(uint256 action) private view {

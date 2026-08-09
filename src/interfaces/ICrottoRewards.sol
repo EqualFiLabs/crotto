@@ -7,6 +7,7 @@ import {NFTRewardPosition, RewardBook} from "../types/CrottoTypes.sol";
 interface ICrottoRewards {
     event RewardAccrued(address indexed asset, uint256 amount, uint256 indexRay, uint256 totalActiveWeight);
     event RewardSettled(uint256 indexed tokenId, uint256 wethAmount, uint256 tokenAmount);
+    event RewardDustRouted(address indexed asset, address indexed treasuryReceiver, uint256 amount);
     event NFTTierActivated(
         uint256 indexed tokenId,
         uint8 indexed previousTier,
