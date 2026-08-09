@@ -10,6 +10,7 @@ import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {IActivationToken} from "../../src/interfaces/IActivationToken.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
+import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {ICrottoSwapFeeHook} from "../../src/interfaces/ICrottoSwapFeeHook.sol";
 import {INFTVault} from "../../src/interfaces/INFTVault.sol";
 import {IPOLInitialization} from "../../src/interfaces/IPOLInitialization.sol";
@@ -40,8 +41,19 @@ contract ProtocolFoundationTest is Test {
     }
 
     function test_ActivationTokenExposesOnlyRestrictedMintSelectors() public pure {
+        assertEq(IActivationToken.GENESIS_TREASURY_SUPPLY.selector, bytes4(keccak256("GENESIS_TREASURY_SUPPLY()")));
         assertEq(IActivationToken.mintPlayerReward.selector, bytes4(keccak256("mintPlayerReward(address,uint256)")));
         assertEq(IActivationToken.mintBootstrapPOL.selector, bytes4(keccak256("mintBootstrapPOL(address,uint256)")));
+    }
+
+    function test_TreasuryReceiverExposesNoCustodySelectors() public pure {
+        assertEq(ICrottoGovernance.setTreasuryReceiver.selector, bytes4(keccak256("setTreasuryReceiver(address)")));
+        assertEq(ICrottoGovernance.treasuryReceiver.selector, bytes4(keccak256("treasuryReceiver()")));
+    }
+
+    function test_PolDonationAndBackupCompoundingSelectorsAreStable() public pure {
+        assertEq(ICrottoSwapFeeHook.donatePOL.selector, bytes4(keccak256("donatePOL(uint256,uint256)")));
+        assertEq(ICrottoSwapFeeHook.compoundPOL.selector, bytes4(keccak256("compoundPOL()")));
     }
 
     function test_RewardNftExposesDiamondMintWithoutBurn() public pure {
@@ -50,26 +62,36 @@ contract ProtocolFoundationTest is Test {
 
     function test_CompiledInterfacesExcludeForbiddenFunctions() public view {
         assertEq(INFTVault.redeemRewardNFT.selector, bytes4(keccak256("redeemRewardNFT(uint256,address)")));
-        assertEq(
-            ICrottoSwapFeeHook.compoundPermanentLiquidity.selector, bytes4(keccak256("compoundPermanentLiquidity()"))
-        );
         assertTrue(_artifactHasFunction("out/IActivationToken.sol/IActivationToken.json", "mintPlayerReward"));
+        assertTrue(_artifactHasFunction("out/IActivationToken.sol/IActivationToken.json", "GENESIS_TREASURY_SUPPLY"));
         assertTrue(_artifactHasFunction("out/IRewardNFT.sol/IRewardNFT.json", "mint"));
         assertTrue(_artifactHasFunction("out/INFTVault.sol/INFTVault.json", "redeemRewardNFT"));
-        assertTrue(
-            _artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "compoundPermanentLiquidity")
-        );
+        assertTrue(_artifactHasFunction("out/ICrottoGovernance.sol/ICrottoGovernance.json", "treasuryReceiver"));
+        assertTrue(_artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "donatePOL"));
+        assertTrue(_artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "compoundPOL"));
 
         _assertArtifactExcludes(
             "out/IActivationToken.sol/IActivationToken.json", _names("mint", "ownerMint", "", "", "")
+        );
+        _assertArtifactExcludes(
+            "out/IActivationToken.sol/IActivationToken.json",
+            _names("mintTreasury", "mintGenesisTreasury", "mintGenesis", "treasuryMint", "")
         );
         _assertArtifactExcludes("out/IRewardNFT.sol/IRewardNFT.json", _names("burn", "publicMint", "ownerMint", "", ""));
         _assertArtifactExcludes(
             "out/INFTVault.sol/INFTVault.json", _names("withdrawBacking", "sweep", "recoverToken", "", "")
         );
         _assertArtifactExcludes(
+            "out/ICrottoGovernance.sol/ICrottoGovernance.json",
+            _names("withdrawTreasuryWeth", "withdrawTreasuryToken", "setTreasury", "treasury", "")
+        );
+        _assertArtifactExcludes(
             "out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json",
             _names("decommissionPool", "releasePermanentLiquidity", "registerPool", "addLiquidity", "removeLiquidity")
+        );
+        _assertArtifactExcludes(
+            "out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json",
+            _names("compoundPermanentLiquidity", "claimDonation", "refundDonation", "withdrawPOL", "releasePOL")
         );
     }
 
@@ -77,30 +99,28 @@ contract ProtocolFoundationTest is Test {
         ProtocolAccountingView memory protocol = ProtocolAccountingView({
             winnerPoolWethLiability: 1,
             rewardNftWethLiability: 2,
-            treasuryWeth: 3,
-            bootstrapPolWeth: 4,
-            operationsReserveEth: 5,
-            callerCreditsEth: 6,
-            playerTokenLiability: 7,
-            rewardNftTokenLiability: 8,
-            vaultBackingToken: 9,
-            treasuryToken: 10
+            bootstrapPolWeth: 3,
+            operationsReserveEth: 4,
+            callerCreditsEth: 5,
+            playerTokenLiability: 6,
+            rewardNftTokenLiability: 7,
+            vaultBackingToken: 8
         });
         VaultAccountingView memory vault = VaultAccountingView({
-            vaultPrice: 11,
-            maxSupply: 12,
-            mintedSupply: 13,
-            vaultInventory: 14,
-            circulatingNfts: 15,
-            vaultTokenBacking: 16,
-            requiredTokenBacking: 17
+            vaultPrice: 9,
+            maxSupply: 10,
+            mintedSupply: 11,
+            vaultInventory: 12,
+            circulatingNfts: 13,
+            vaultTokenBacking: 14,
+            requiredTokenBacking: 15
         });
         POLAccountingView memory pol = POLAccountingView({
             initialized: true,
-            poolId: PoolId.wrap(bytes32(uint256(18))),
-            lockedLiquidity: 19,
-            pendingToken: 20,
-            pendingWeth: 21
+            poolId: PoolId.wrap(bytes32(uint256(16))),
+            lockedLiquidity: 17,
+            pendingToken: 18,
+            pendingWeth: 19
         });
 
         (
@@ -111,13 +131,13 @@ contract ProtocolFoundationTest is Test {
             abi.encode(protocol, vault, pol), (ProtocolAccountingView, VaultAccountingView, POLAccountingView)
         );
 
-        assertEq(decodedProtocol.bootstrapPolWeth, 4);
-        assertEq(decodedProtocol.operationsReserveEth, 5);
-        assertEq(decodedProtocol.vaultBackingToken, 9);
-        assertEq(decodedVault.vaultTokenBacking, 16);
-        assertEq(PoolId.unwrap(decodedPol.poolId), bytes32(uint256(18)));
-        assertEq(decodedPol.pendingToken, 20);
-        assertEq(decodedPol.pendingWeth, 21);
+        assertEq(decodedProtocol.bootstrapPolWeth, 3);
+        assertEq(decodedProtocol.operationsReserveEth, 4);
+        assertEq(decodedProtocol.vaultBackingToken, 8);
+        assertEq(decodedVault.vaultTokenBacking, 14);
+        assertEq(PoolId.unwrap(decodedPol.poolId), bytes32(uint256(16)));
+        assertEq(decodedPol.pendingToken, 18);
+        assertEq(decodedPol.pendingWeth, 19);
     }
 
     function _assertArtifactExcludes(string memory artifactPath, string[5] memory forbiddenNames) private view {

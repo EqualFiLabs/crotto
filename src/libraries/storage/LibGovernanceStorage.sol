@@ -18,7 +18,7 @@ library LibGovernanceStorage {
         RoundConfiguration roundConfiguration;
         ActivationConfiguration activationConfiguration;
         HookConfiguration hookConfiguration;
-        address treasury;
+        address treasuryReceiver;
         address guardian;
         uint64 activationConfigurationVersion;
         uint256 pausedActions;

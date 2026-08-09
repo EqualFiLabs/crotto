@@ -129,14 +129,12 @@ struct NFTRewardPosition {
 struct ProtocolAccountingView {
     uint256 winnerPoolWethLiability;
     uint256 rewardNftWethLiability;
-    uint256 treasuryWeth;
     uint256 bootstrapPolWeth;
     uint256 operationsReserveEth;
     uint256 callerCreditsEth;
     uint256 playerTokenLiability;
     uint256 rewardNftTokenLiability;
     uint256 vaultBackingToken;
-    uint256 treasuryToken;
 }
 
 /// @notice NFTVault supply, inventory, and TOKEN backing state.

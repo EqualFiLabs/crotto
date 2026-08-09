@@ -3,16 +3,15 @@ pragma solidity 0.8.33;
 
 import {ActivationConfiguration, HookConfiguration, RoundConfiguration} from "../types/CrottoTypes.sol";
 
-/// @notice Timelock-governed economics, treasury, and bounded guardian controls.
+/// @notice Timelock-governed economics, external Treasury Receiver, and bounded guardian controls.
 interface ICrottoGovernance {
     event RoundConfigurationSet(RoundConfiguration configuration);
     event ActivationConfigurationSet(uint64 indexed version, ActivationConfiguration configuration);
     event HookConfigurationSet(HookConfiguration configuration);
-    event TreasuryChanged(address indexed previousTreasury, address indexed newTreasury);
+    event TreasuryReceiverChanged(address indexed previousReceiver, address indexed newReceiver);
     event GuardianChanged(address indexed previousGuardian, address indexed newGuardian);
     event ActionsPaused(uint256 indexed flags, address indexed guardian);
     event ActionsUnpaused(uint256 indexed flags);
-    event TreasuryWithdrawn(address indexed asset, address indexed receiver, uint256 amount);
 
     function setRoundConfiguration(RoundConfiguration calldata configuration) external;
 
@@ -20,7 +19,7 @@ interface ICrottoGovernance {
 
     function setHookConfiguration(HookConfiguration calldata configuration) external;
 
-    function setTreasury(address newTreasury) external;
+    function setTreasuryReceiver(address newReceiver) external;
 
     function setGuardian(address newGuardian) external;
 
@@ -28,11 +27,7 @@ interface ICrottoGovernance {
 
     function unpauseActions(uint256 flags) external;
 
-    function withdrawTreasuryWeth(address receiver, uint256 amount) external;
-
-    function withdrawTreasuryToken(address receiver, uint256 amount) external;
-
-    function treasury() external view returns (address);
+    function treasuryReceiver() external view returns (address);
 
     function guardian() external view returns (address);
 
