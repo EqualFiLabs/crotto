@@ -5,8 +5,12 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 /// @notice Restricted TOKEN surface: Diamond player emissions, one hook bootstrap mint, and holder burns.
 interface IActivationToken is IERC20 {
+    event GenesisTreasuryMinted(address indexed treasuryReceiver, uint256 amount);
     event PlayerRewardMinted(address indexed receiver, uint256 amount);
     event BootstrapPOLMinted(address indexed receiver, uint256 amount);
+
+    /// @notice Exact constructor mint amount exposed through ActivationToken's public constant getter.
+    function GENESIS_TREASURY_SUPPLY() external view returns (uint256);
 
     function mintPlayerReward(address receiver, uint256 amount) external;
 

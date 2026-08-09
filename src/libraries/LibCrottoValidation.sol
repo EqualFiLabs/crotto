@@ -87,6 +87,10 @@ library LibCrottoValidation {
         validateAllocation(config.polShareBps, config.nftShareBps, config.treasuryShareBps);
     }
 
+    function validateTreasuryReceiver(address receiver) internal pure {
+        _nonzero(receiver, "treasuryReceiver");
+    }
+
     function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {
         uint256 totalBps = uint256(firstShareBps) + secondShareBps + thirdShareBps;
         if (totalBps != CrottoConstants.BPS) revert InvalidAllocation(totalBps);

@@ -23,6 +23,7 @@ interface ICrottoSwapFeeHook {
     );
     event PermanentLiquidityAdded(PoolId indexed poolId, uint128 liquidityAdded, uint256 tokenUsed, uint256 wethUsed);
     event PermanentLiquidityFeesCollected(PoolId indexed poolId, uint256 tokenAmount, uint256 wethAmount);
+    event POLDonated(address indexed donor, uint256 tokenAmount, uint256 wethAmount);
 
     function setHookConfiguration(HookConfiguration calldata configuration) external;
 
@@ -33,7 +34,9 @@ interface ICrottoSwapFeeHook {
         uint256 wethAmount
     ) external returns (PoolId poolId, uint128 liquidity);
 
-    function compoundPermanentLiquidity() external returns (uint128 liquidityAdded);
+    function donatePOL(uint256 tokenAmount, uint256 wethAmount) external returns (uint128 liquidityAdded);
+
+    function compoundPOL() external returns (uint128 liquidityAdded);
 
     function crottoDiamond() external view returns (address);
 

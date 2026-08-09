@@ -36,6 +36,10 @@ contract ValidationHarness {
         LibCrottoValidation.validateHookConfiguration(configuration, SafeCast.toUint16(maximumFeeBps));
     }
 
+    function validateTreasuryReceiver(address receiver) external pure {
+        LibCrottoValidation.validateTreasuryReceiver(receiver);
+    }
+
     function validateAllocation(uint256 first, uint256 second, uint256 third) external pure {
         if (first > type(uint16).max) revert HarnessValueOutOfBounds(first);
         if (second > type(uint16).max) revert HarnessValueOutOfBounds(second);
@@ -53,6 +57,7 @@ contract ValidationHarness {
 contract ConfigurationValidationTest is Test {
     bytes32 private constant CANONICAL_HOOK_FIELD = "canonicalHook";
     bytes32 private constant PLAYER_REWARD_RATE_FIELD = "playerRewardRate";
+    bytes32 private constant TREASURY_RECEIVER_FIELD = "treasuryReceiver";
     bytes32 private constant UNISWAP_V4_POOL_MANAGER_FIELD = "uniswapV4PoolManager";
     bytes32 private constant VAULT_PRICE_FIELD = "vaultPrice";
 
@@ -65,6 +70,7 @@ contract ConfigurationValidationTest is Test {
     function test_DefaultConstantsMatchApprovedEconomics() public pure {
         assertEq(CrottoConstants.BPS, 10_000);
         assertEq(CrottoConstants.RAY, 1e27);
+        assertEq(CrottoConstants.GENESIS_TREASURY_SUPPLY, 10_000_000 ether);
 
         assertEq(CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS, 5_000);
         assertEq(CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS, 4_000);
@@ -92,7 +98,13 @@ contract ConfigurationValidationTest is Test {
         harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
         harness.validateActivationConfiguration(_validActivationConfiguration());
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
+        harness.validateTreasuryReceiver(address(0x1007));
         harness.validatePauseFlags(CrottoConstants.ALL_PAUSE_FLAGS);
+    }
+
+    function test_RevertWhen_TreasuryReceiverIsZero() public {
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroAddress.selector, TREASURY_RECEIVER_FIELD));
+        harness.validateTreasuryReceiver(address(0));
     }
 
     function test_RevertWhen_ImmutableAddressIsZero() public {
