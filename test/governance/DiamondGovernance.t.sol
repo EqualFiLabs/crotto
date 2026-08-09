@@ -38,16 +38,12 @@ contract GovernedHookProbe {
     bool public rejectConfiguration;
     HookConfiguration private storedConfiguration;
 
-    function bindDiamond(address diamond_) external {
-        require(diamond == address(0));
-        diamond = diamond_;
-    }
-
     function setRejectConfiguration(bool reject) external {
         rejectConfiguration = reject;
     }
 
     function setHookConfiguration(HookConfiguration calldata newConfiguration) external {
+        if (diamond == address(0)) diamond = msg.sender;
         if (msg.sender != diamond) revert UnauthorizedDiamond(msg.sender, diamond);
         if (rejectConfiguration) revert ConfigurationRejected();
         lastCaller = msg.sender;
@@ -204,7 +200,6 @@ contract DiamondGovernanceTest is Test {
             address(initializer),
             abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
         );
-        hook.bindDiamond(address(diamond));
         governance = ICrottoGovernance(address(diamond));
         stateProbe = GovernanceStateProbeFacet(address(diamond));
         pauseProbe = PausedSurfaceProbeFacet(address(diamond));
@@ -219,9 +214,36 @@ contract DiamondGovernanceTest is Test {
         assertEq(version, 1);
         assertEq(activation.costs[0], 100 ether);
         assertEq(stateProbe.hookConfiguration().inputFeeBps, 50);
+        assertEq(hook.configuration().inputFeeBps, 50);
+        assertEq(hook.lastCaller(), address(diamond));
         assertEq(governance.treasuryReceiver(), treasury);
         assertEq(governance.guardian(), guardian);
         assertTrue(IERC165(address(diamond)).supportsInterface(type(ICrottoGovernance).interfaceId));
+    }
+
+    function test_RevertWhen_ImmutableCanonicalHookHasNoCode() public {
+        DiamondCutFacet cutFacet = new DiamondCutFacet();
+        DiamondLoupeFacet loupeFacet = new DiamondLoupeFacet();
+        OwnershipFacet ownershipFacet = new OwnershipFacet();
+        GovernanceFacet governanceFacet = new GovernanceFacet();
+        CrottoDiamondInit initializer = new CrottoDiamondInit();
+
+        IDiamondCut.FacetCut[] memory initialCut = new IDiamondCut.FacetCut[](4);
+        initialCut[0] = _facetCut(address(cutFacet), _cutSelectors());
+        initialCut[1] = _facetCut(address(loupeFacet), _loupeSelectors());
+        initialCut[2] = _facetCut(address(ownershipFacet), _ownershipSelectors());
+        initialCut[3] = _facetCut(address(governanceFacet), _governanceSelectors());
+
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.canonicalHook = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.CanonicalHookHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
     }
 
     function test_AllGovernedSettersExecuteThroughTimelockAndApplyProspectively() public {

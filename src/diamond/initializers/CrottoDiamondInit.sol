@@ -6,6 +6,7 @@ import {IDiamondCut} from "../../interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../interfaces/diamond/IERC173.sol";
 import {ICrottoGovernance} from "../../interfaces/ICrottoGovernance.sol";
+import {ICrottoSwapFeeHook} from "../../interfaces/ICrottoSwapFeeHook.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {GovernanceInitialization} from "../../types/CrottoTypes.sol";
@@ -13,6 +14,8 @@ import {LibDiamond} from "../libraries/LibDiamond.sol";
 
 /// @notice One-time core interface registration executed in Diamond storage context.
 contract CrottoDiamondInit {
+    error CanonicalHookHasNoCode(address hook);
+
     function initialize() external {
         _validateCoreSelectors();
         LibDiamond.markCoreInterfacesInitialized();
@@ -33,6 +36,9 @@ contract CrottoDiamondInit {
         );
         LibCrottoValidation.validateTreasuryReceiver(initialization.treasuryReceiver);
 
+        address hook = initialization.immutableConfiguration.canonicalHook;
+        if (hook.code.length == 0) revert CanonicalHookHasNoCode(hook);
+
         LibGovernanceStorage.Layout storage state = LibGovernanceStorage.layout();
         state.immutableConfiguration = initialization.immutableConfiguration;
         state.roundConfiguration = initialization.roundConfiguration;
@@ -42,6 +48,8 @@ contract CrottoDiamondInit {
         state.guardian = initialization.guardian;
         state.activationConfigurationVersion = 1;
         state.immutableConfigurationInitialized = true;
+
+        ICrottoSwapFeeHook(hook).setHookConfiguration(initialization.hookConfiguration);
 
         LibDiamond.setSupportedInterface(type(ICrottoGovernance).interfaceId, true);
         LibDiamond.markCoreInterfacesInitialized();
