@@ -4,9 +4,10 @@ Crotto is an onchain lottery and economic primitive. Lottery participation emits
 Reward NFTs can be activated for revenue participation. A canonical Uniswap v4 TOKEN/WETH pool grows permanently
 locked protocol-owned liquidity.
 
-This repository currently contains the protocol foundation and the deployable ActivationToken satellite. The token
-mints its fixed genesis treasury supply during construction, restricts later emissions to the Diamond and canonical
-hook, and lets holders burn their own CROTTO. Lottery, NFT, vault, and hook behavior remain under development.
+This repository currently contains the protocol foundation and the deployable ActivationToken and RewardNFT
+satellites. ActivationToken restricts post-deployment emissions to the Diamond and canonical hook. Crottos enforce a
+fixed maximum supply and Diamond-only minting. Lottery, reward accounting, vault, and hook behavior remain under
+development.
 
 ## Architecture
 
