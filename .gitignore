@@ -1,2 +1,17 @@
 /AGENTS.md
 /specs/
+
+# Foundry outputs and local state
+/broadcast/
+/cache/
+/out/
+/coverage/
+/lcov.info
+
+# Local environment and editor files
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/

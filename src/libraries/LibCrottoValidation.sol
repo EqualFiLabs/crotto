@@ -1,0 +1,106 @@
+// SPDX-License-Identifier: BUSL-1.1
+pragma solidity 0.8.33;
+
+import {CrottoConstants} from "./CrottoConstants.sol";
+import {
+    ActivationConfiguration,
+    HookConfiguration,
+    ImmutableConfiguration,
+    RoundConfiguration
+} from "../types/CrottoTypes.sol";
+
+/// @notice Pure deployment and governance configuration validation.
+library LibCrottoValidation {
+    error ZeroAddress(bytes32 field);
+    error ZeroValue(bytes32 field);
+    error InvalidAllocation(uint256 totalBps);
+    error InvalidTierCosts();
+    error InvalidTierWeights();
+    error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
+    error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
+    error BootstrapThresholdUnreachable(uint256 available, uint256 required);
+    error InvalidPauseFlags(uint256 flags);
+
+    function validateImmutableConfiguration(ImmutableConfiguration memory config) internal pure {
+        _nonzero(config.activationToken, "activationToken");
+        _nonzero(config.rewardNFT, "rewardNFT");
+        _nonzero(config.weth, "weth");
+        _nonzero(config.vrfWrapper, "vrfWrapper");
+        _nonzero(config.uniswapV4PoolManager, "uniswapV4PoolManager");
+        _nonzero(config.canonicalHook, "canonicalHook");
+        _positive(config.rewardNFTMaxSupply, "rewardNFTMaxSupply");
+        _positive(config.vaultPrice, "vaultPrice");
+        _positive(config.requiredBootstrapWeth, "requiredBootstrapWeth");
+        _positive(config.initialTokenPerWethWad, "initialTokenPerWethWad");
+        _positive(config.maxCombinedHookFeeBps, "maxCombinedHookFeeBps");
+
+        if (config.maxCombinedHookFeeBps > CrottoConstants.BPS) {
+            revert InvalidHookFeeCeiling(config.maxCombinedHookFeeBps, CrottoConstants.BPS);
+        }
+        if (config.canonicalTickSpacing <= 0) revert ZeroValue("canonicalTickSpacing");
+    }
+
+    function validateRoundConfiguration(RoundConfiguration memory config) internal pure {
+        _positive(config.ticketPrice, "ticketPrice");
+        _positive(config.ticketOperationsFee, "ticketOperationsFee");
+        _positive(config.playerRewardRate, "playerRewardRate");
+        _positive(config.ticketTarget, "ticketTarget");
+        _positive(config.maxVrfCost, "maxVrfCost");
+        _positive(config.vrfRetryDelay, "vrfRetryDelay");
+        _positive(config.requestCallerReward, "requestCallerReward");
+        _positive(config.finalizationCallerReward, "finalizationCallerReward");
+        validateAllocation(config.winnerShareBps, config.nftShareBps, config.treasuryShareBps);
+
+        uint256 available = config.ticketOperationsFee * config.ticketTarget;
+        uint256 required = config.maxVrfCost + config.requestCallerReward + config.finalizationCallerReward;
+        if (available < required) revert InsufficientRoundOperationsFunding(available, required);
+    }
+
+    function validateBootstrapReachability(RoundConfiguration memory config, uint256 requiredBootstrapWeth)
+        internal
+        pure
+    {
+        _positive(requiredBootstrapWeth, "requiredBootstrapWeth");
+        uint256 nftAllocationAtSellout =
+            config.ticketPrice * config.ticketTarget * config.nftShareBps / CrottoConstants.BPS;
+        if (nftAllocationAtSellout < requiredBootstrapWeth) {
+            revert BootstrapThresholdUnreachable(nftAllocationAtSellout, requiredBootstrapWeth);
+        }
+    }
+
+    function validateActivationConfiguration(ActivationConfiguration memory config) internal pure {
+        if (!(config.costs[0] < config.costs[1] && config.costs[1] < config.costs[2])) {
+            revert InvalidTierCosts();
+        }
+        if (!(config.destinationWeights[0] > 0 && config.destinationWeights[0] < config.destinationWeights[1]
+                    && config.destinationWeights[1] < config.destinationWeights[2])) {
+            revert InvalidTierWeights();
+        }
+        validateAllocation(config.burnShareBps, config.nftShareBps, config.treasuryShareBps);
+    }
+
+    function validateHookConfiguration(HookConfiguration memory config, uint16 maximumCombinedFeeBps) internal pure {
+        uint256 combinedFeeBps = uint256(config.inputFeeBps) + config.outputFeeBps;
+        if (combinedFeeBps > maximumCombinedFeeBps) {
+            revert InvalidHookFeeCeiling(combinedFeeBps, maximumCombinedFeeBps);
+        }
+        validateAllocation(config.polShareBps, config.nftShareBps, config.treasuryShareBps);
+    }
+
+    function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {
+        uint256 totalBps = uint256(firstShareBps) + secondShareBps + thirdShareBps;
+        if (totalBps != CrottoConstants.BPS) revert InvalidAllocation(totalBps);
+    }
+
+    function validatePauseFlags(uint256 flags) internal pure {
+        if (flags == 0 || (flags & ~CrottoConstants.ALL_PAUSE_FLAGS) != 0) revert InvalidPauseFlags(flags);
+    }
+
+    function _nonzero(address value, bytes32 field) private pure {
+        if (value == address(0)) revert ZeroAddress(field);
+    }
+
+    function _positive(uint256 value, bytes32 field) private pure {
+        if (value == 0) revert ZeroValue(field);
+    }
+}
