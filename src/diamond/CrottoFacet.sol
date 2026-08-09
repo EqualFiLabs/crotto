@@ -6,10 +6,17 @@ import {LibGovernanceStorage} from "../libraries/storage/LibGovernanceStorage.so
 
 /// @notice Shared security modifiers and scoped RewardNFT transfer helpers for Crotto facets.
 abstract contract CrottoFacet {
+    error ActionPaused(uint256 action);
+
     modifier nonReentrant() {
         LibCrottoGuard.enter();
         _;
         LibCrottoGuard.exit();
+    }
+
+    modifier whenNotPaused(uint256 action) {
+        _enforceNotPaused(action);
+        _;
     }
 
     // The callback's root-entry bit must span the facet body so the guard can be released correctly.
@@ -30,5 +37,9 @@ abstract contract CrottoFacet {
     // forge-lint: disable-next-line(mixed-case-function)
     function _finishRewardNFTTransfer() internal {
         LibCrottoGuard.finishRewardNFTTransfer();
+    }
+
+    function _enforceNotPaused(uint256 action) private view {
+        if ((LibGovernanceStorage.layout().pausedActions & action) != 0) revert ActionPaused(action);
     }
 }

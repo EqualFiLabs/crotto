@@ -76,6 +76,16 @@ struct HookConfiguration {
     uint16 treasuryShareBps;
 }
 
+/// @notice Complete one-time Diamond governance initialization payload.
+struct GovernanceInitialization {
+    ImmutableConfiguration immutableConfiguration;
+    RoundConfiguration roundConfiguration;
+    ActivationConfiguration activationConfiguration;
+    HookConfiguration hookConfiguration;
+    address treasuryReceiver;
+    address guardian;
+}
+
 /// @notice Complete state and immutable economic snapshot for one round.
 struct Round {
     RoundStatus status;

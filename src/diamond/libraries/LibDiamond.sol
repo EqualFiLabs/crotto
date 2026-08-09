@@ -5,6 +5,7 @@ import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IDiamondCut} from "../../interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../interfaces/diamond/IERC173.sol";
+import {ICrottoGovernance} from "../../interfaces/ICrottoGovernance.sol";
 
 /// @notice Selector routing, ownership, and interface state for the Crotto Diamond.
 library LibDiamond {
@@ -119,6 +120,17 @@ library LibDiamond {
             && _selectorInstalled(ds, IDiamondLoupe.facetAddress.selector);
         ds.supportedInterfaces[type(IERC173).interfaceId] = _selectorInstalled(ds, IERC173.owner.selector)
             && _selectorInstalled(ds, IERC173.transferOwnership.selector);
+        ds.supportedInterfaces[type(ICrottoGovernance).interfaceId] = _selectorInstalled(
+            ds, ICrottoGovernance.setRoundConfiguration.selector
+        ) && _selectorInstalled(ds, ICrottoGovernance.setActivationConfiguration.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.setHookConfiguration.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.setTreasuryReceiver.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.setGuardian.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.pauseActions.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.unpauseActions.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.treasuryReceiver.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.guardian.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.pausedActions.selector);
     }
 
     function _addFunctions(address facet, bytes4[] memory selectors) private {

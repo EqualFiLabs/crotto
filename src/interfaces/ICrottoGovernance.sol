@@ -10,7 +10,7 @@ interface ICrottoGovernance {
     event HookConfigurationSet(HookConfiguration configuration);
     event TreasuryReceiverChanged(address indexed previousReceiver, address indexed newReceiver);
     event GuardianChanged(address indexed previousGuardian, address indexed newGuardian);
-    event ActionsPaused(uint256 indexed flags, address indexed guardian);
+    event ActionsPaused(uint256 indexed flags, address indexed caller);
     event ActionsUnpaused(uint256 indexed flags);
 
     function setRoundConfiguration(RoundConfiguration calldata configuration) external;
