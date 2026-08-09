@@ -5,8 +5,9 @@ Reward NFTs can be activated for revenue participation. A canonical Uniswap v4 T
 locked protocol-owned liquidity.
 
 This repository currently contains the protocol foundation and the deployable ActivationToken and RewardNFT
-satellites. The token restricts post-deployment emissions to the Diamond and canonical hook. Crottos enforce a fixed
-maximum supply and Diamond-only minting. Lottery, reward accounting, vault, and hook behavior remain under development.
+satellites. ActivationToken restricts post-deployment emissions to the Diamond and canonical hook. Crottos enforce a
+fixed maximum supply and Diamond-only minting. Lottery, reward accounting, vault, and hook behavior remain under
+development.
 
 ## Architecture
 

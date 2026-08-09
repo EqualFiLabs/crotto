@@ -2,6 +2,8 @@
 pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721Metadata} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {CrottoDiamond} from "../../src/diamond/CrottoDiamond.sol";
 import {CrottoFacet} from "../../src/diamond/CrottoFacet.sol";
@@ -14,6 +16,7 @@ import {LibDiamond} from "../../src/diamond/libraries/LibDiamond.sol";
 import {CrottoTimelock} from "../../src/governance/CrottoTimelock.sol";
 import {RewardNFT} from "../../src/token/RewardNFT.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
+import {IRewardNFT} from "../../src/interfaces/IRewardNFT.sol";
 import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
@@ -53,6 +56,32 @@ contract GovernedHookProbe {
 
     function configuration() external view returns (HookConfiguration memory) {
         return storedConfiguration;
+    }
+}
+
+contract RewardNftWithoutErc165Probe {
+    address private immutable CROTTO_DIAMOND;
+    uint256 private immutable MAX_SUPPLY;
+
+    constructor(address crottoDiamond_, uint256 maxSupply_) {
+        CROTTO_DIAMOND = crottoDiamond_;
+        MAX_SUPPLY = maxSupply_;
+    }
+
+    function crottoDiamond() external view returns (address) {
+        return CROTTO_DIAMOND;
+    }
+
+    function maxSupply() external view returns (uint256) {
+        return MAX_SUPPLY;
+    }
+}
+
+contract RewardNftCustomInterfaceOnlyProbe is RewardNftWithoutErc165Probe {
+    constructor(address crottoDiamond_, uint256 maxSupply_) RewardNftWithoutErc165Probe(crottoDiamond_, maxSupply_) {}
+
+    function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
+        return interfaceId == type(IERC165).interfaceId || interfaceId == type(IRewardNFT).interfaceId;
     }
 }
 
@@ -252,6 +281,51 @@ contract DiamondGovernanceTest is Test {
         initialization.immutableConfiguration.rewardNFT = stranger;
 
         vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.RewardNFTHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_RewardNFTDoesNotSupportInterface() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNftWithoutErc165Probe unsupportedRewardNft = new RewardNftWithoutErc165Probe(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(unsupportedRewardNft);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.RewardNFTUnsupportedInterface.selector, address(unsupportedRewardNft)
+            )
+        );
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_RewardNFTSupportsOnlyCustomInterface() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNftCustomInterfaceOnlyProbe incompleteRewardNft =
+            new RewardNftCustomInterfaceOnlyProbe(predictedDiamond, 10_000);
+        assertTrue(incompleteRewardNft.supportsInterface(type(IRewardNFT).interfaceId));
+        assertFalse(incompleteRewardNft.supportsInterface(type(IERC721).interfaceId));
+        assertFalse(incompleteRewardNft.supportsInterface(type(IERC721Metadata).interfaceId));
+
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(incompleteRewardNft);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.RewardNFTUnsupportedInterface.selector, address(incompleteRewardNft)
+            )
+        );
         new CrottoDiamond(
             address(timelock),
             initialCut,
