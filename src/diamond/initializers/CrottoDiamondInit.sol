@@ -20,9 +20,6 @@ contract CrottoDiamondInit {
         LibDiamond.enforceSelectorExists(IERC173.transferOwnership.selector);
 
         LibDiamond.markCoreInterfacesInitialized();
-        LibDiamond.setSupportedInterface(type(IERC165).interfaceId, true);
-        LibDiamond.setSupportedInterface(type(IDiamondCut).interfaceId, true);
-        LibDiamond.setSupportedInterface(type(IDiamondLoupe).interfaceId, true);
-        LibDiamond.setSupportedInterface(type(IERC173).interfaceId, true);
+        LibDiamond.syncCoreInterfaces();
     }
 }

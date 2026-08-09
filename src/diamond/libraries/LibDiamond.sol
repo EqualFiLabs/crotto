@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.33;
 
+import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {IDiamondCut} from "../../interfaces/diamond/IDiamondCut.sol";
+import {IDiamondLoupe} from "../../interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../interfaces/diamond/IERC173.sol";
 
 /// @notice Selector routing, ownership, and interface state for the Crotto Diamond.
@@ -103,6 +105,19 @@ library LibDiamond {
 
         emit IDiamondCut.DiamondCut(cuts, init, initCalldata);
         _initializeDiamondCut(init, initCalldata);
+        if (diamondStorage().coreInterfacesInitialized) syncCoreInterfaces();
+    }
+
+    function syncCoreInterfaces() internal {
+        DiamondStorage storage ds = diamondStorage();
+        ds.supportedInterfaces[type(IERC165).interfaceId] = _selectorInstalled(ds, IERC165.supportsInterface.selector);
+        ds.supportedInterfaces[type(IDiamondCut).interfaceId] = _selectorInstalled(ds, IDiamondCut.diamondCut.selector);
+        ds.supportedInterfaces[type(IDiamondLoupe).interfaceId] = _selectorInstalled(ds, IDiamondLoupe.facets.selector)
+            && _selectorInstalled(ds, IDiamondLoupe.facetFunctionSelectors.selector)
+            && _selectorInstalled(ds, IDiamondLoupe.facetAddresses.selector)
+            && _selectorInstalled(ds, IDiamondLoupe.facetAddress.selector);
+        ds.supportedInterfaces[type(IERC173).interfaceId] = _selectorInstalled(ds, IERC173.owner.selector)
+            && _selectorInstalled(ds, IERC173.transferOwnership.selector);
     }
 
     function _addFunctions(address facet, bytes4[] memory selectors) private {
@@ -128,7 +143,6 @@ library LibDiamond {
 
         DiamondStorage storage ds = diamondStorage();
         _enforceHasCode(facet);
-        _addFacetIfMissing(ds, facet);
 
         for (uint256 i; i < selectors.length; ++i) {
             bytes4 selector = selectors[i];
@@ -221,5 +235,9 @@ library LibDiamond {
 
     function _enforceHasCode(address account) private view {
         if (account.code.length == 0) revert FacetHasNoCode(account);
+    }
+
+    function _selectorInstalled(DiamondStorage storage ds, bytes4 selector) private view returns (bool) {
+        return ds.selectorToFacetAndPosition[selector].facetAddress != address(0);
     }
 }
