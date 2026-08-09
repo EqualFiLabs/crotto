@@ -1,12 +1,12 @@
 # Crotto
 
-Crotto is an onchain lottery and economic primitive. Lottery participation emits the Activation Token, fixed-supply
-Reward NFTs can be activated for revenue participation, and a canonical Uniswap v4 TOKEN/WETH pool grows permanently
+Crotto is an onchain lottery and economic primitive. Lottery participation emits CROTTO, while a fixed supply of
+Reward NFTs can be activated for revenue participation. A canonical Uniswap v4 TOKEN/WETH pool grows permanently
 locked protocol-owned liquidity.
 
 This repository currently contains the protocol foundation and the deployable ActivationToken satellite. The token
 mints its fixed genesis treasury supply during construction, restricts later emissions to the Diamond and canonical
-hook, and lets holders burn their own TOKEN. Lottery, NFT, vault, and hook behavior remain under development.
+hook, and lets holders burn their own CROTTO. Lottery, NFT, vault, and hook behavior remain under development.
 
 ## Architecture
 
