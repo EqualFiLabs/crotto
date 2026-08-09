@@ -1,22 +1,18 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.33;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ICrottoRewards} from "../interfaces/ICrottoRewards.sol";
 import {CrottoConstants} from "./CrottoConstants.sol";
+import {LibAssetTransfer} from "./LibAssetTransfer.sol";
 import {LibGovernanceStorage} from "./storage/LibGovernanceStorage.sol";
 import {LibRewardsStorage} from "./storage/LibRewardsStorage.sol";
 import {NFTRewardPosition, RewardBook} from "../types/CrottoTypes.sol";
 
 /// @notice Constant-time WETH and TOKEN accounting for Reward NFT positions.
 library LibRewardAccounting {
-    using SafeERC20 for IERC20;
-
     error NoActiveRewardWeight();
     error ActivePositionCheckpoint(uint256 tokenId);
-    error TreasuryTransferMismatch(address asset, uint256 expectedDebit, uint256 actualDebit, uint256 actualReceipt);
 
     function accrueWeth(uint256 amount) internal returns (uint256 indexRay) {
         LibRewardsStorage.Layout storage state = LibRewardsStorage.layout();
@@ -148,7 +144,7 @@ library LibRewardAccounting {
         uint256 dust = book.indexedAmount - book.crystallizedAmount;
         if (dust != 0) {
             address receiver = LibGovernanceStorage.layout().treasuryReceiver;
-            _transferExact(asset, receiver, dust);
+            LibAssetTransfer.pushExact(asset, receiver, dust);
             emit ICrottoRewards.RewardDustRouted(asset, receiver, dust);
         }
 
@@ -156,21 +152,6 @@ library LibRewardAccounting {
         book.indexRemainder = 0;
         book.indexedAmount = 0;
         book.crystallizedAmount = 0;
-    }
-
-    function _transferExact(address asset, address receiver, uint256 amount) private {
-        IERC20 token = IERC20(asset);
-        uint256 senderBefore = token.balanceOf(address(this));
-        uint256 receiverBefore = token.balanceOf(receiver);
-        token.safeTransfer(receiver, amount);
-        uint256 senderAfter = token.balanceOf(address(this));
-        uint256 receiverAfter = token.balanceOf(receiver);
-
-        uint256 actualDebit = senderBefore >= senderAfter ? senderBefore - senderAfter : 0;
-        uint256 actualReceipt = receiverAfter >= receiverBefore ? receiverAfter - receiverBefore : 0;
-        if (actualDebit != amount || actualReceipt != amount) {
-            revert TreasuryTransferMismatch(asset, amount, actualDebit, actualReceipt);
-        }
     }
 
     function _indexDelta(uint256 amount, uint256 priorRemainder, uint256 denominator)

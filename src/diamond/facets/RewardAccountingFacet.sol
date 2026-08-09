@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.33;
 
-import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ICrottoRewards} from "../../interfaces/ICrottoRewards.sol";
+import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
 import {LibRewardAccounting} from "../../libraries/LibRewardAccounting.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
@@ -12,12 +11,8 @@ import {CrottoFacet} from "../CrottoFacet.sol";
 
 /// @notice Two-asset Reward NFT books, views, and authenticated hook revenue routing.
 contract RewardAccountingFacet is CrottoFacet {
-    using SafeERC20 for IERC20;
-
     error UnauthorizedCanonicalHook(address caller, address expectedHook);
     error InvalidRewardAsset(address asset);
-    error UnexpectedRewardTokenDebit(address asset, uint256 expected, uint256 actual);
-    error UnexpectedRewardTokenReceipt(address asset, uint256 expected, uint256 actual);
 
     /// @notice Pulls and indexes only the Reward NFT leg already allocated by the canonical hook.
     /// @dev The hook transfers its treasury leg directly to the external Treasury Receiver before this call.
@@ -36,7 +31,7 @@ contract RewardAccountingFacet is CrottoFacet {
 
         if (rewardAmount != 0) {
             if (LibRewardsStorage.layout().totalActiveWeight == 0) revert LibRewardAccounting.NoActiveRewardWeight();
-            _pullExact(asset, rewardAmount);
+            LibAssetTransfer.pullExact(asset, msg.sender, rewardAmount);
             if (asset == weth) LibRewardAccounting.accrueWeth(rewardAmount);
             else LibRewardAccounting.accrueToken(rewardAmount);
         }
@@ -62,19 +57,5 @@ contract RewardAccountingFacet is CrottoFacet {
 
     function pendingNFTRewards(uint256 tokenId) external view returns (uint256 wethAmount, uint256 tokenAmount) {
         return LibRewardAccounting.pending(tokenId);
-    }
-
-    function _pullExact(address asset, uint256 amount) private {
-        IERC20 token = IERC20(asset);
-        uint256 senderBefore = token.balanceOf(msg.sender);
-        uint256 receiverBefore = token.balanceOf(address(this));
-        token.safeTransferFrom(msg.sender, address(this), amount);
-        uint256 senderAfter = token.balanceOf(msg.sender);
-        uint256 receiverAfter = token.balanceOf(address(this));
-
-        uint256 senderDebit = senderBefore >= senderAfter ? senderBefore - senderAfter : 0;
-        if (senderDebit != amount) revert UnexpectedRewardTokenDebit(asset, amount, senderDebit);
-        uint256 receiverReceipt = receiverAfter >= receiverBefore ? receiverAfter - receiverBefore : 0;
-        if (receiverReceipt != amount) revert UnexpectedRewardTokenReceipt(asset, amount, receiverReceipt);
     }
 }

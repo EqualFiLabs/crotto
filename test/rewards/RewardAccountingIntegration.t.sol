@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ICrottoRewards} from "../../src/interfaces/ICrottoRewards.sol";
 import {LibRewardAccounting} from "../../src/libraries/LibRewardAccounting.sol";
+import {LibAssetTransfer} from "../../src/libraries/LibAssetTransfer.sol";
 import {RewardAccountingFacet} from "../../src/diamond/facets/RewardAccountingFacet.sol";
 import {RewardAccountingTestBase, RewardAssetMock} from "./RewardNFTIndexes.t.sol";
 
@@ -100,7 +101,7 @@ contract RewardAccountingIntegrationTest is RewardAccountingTestBase {
 
         vm.expectRevert(
             abi.encodeWithSelector(
-                RewardAccountingFacet.UnexpectedRewardTokenReceipt.selector, address(feeAsset), 100, 99
+                LibAssetTransfer.UnexpectedTokenReceipt.selector, address(feeAsset), address(diamond), 100, 99
             )
         );
         hook.route(address(diamond), IERC20(address(feeAsset)), 100, 0);
