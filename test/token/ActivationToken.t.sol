@@ -190,4 +190,75 @@ contract ActivationTokenTest is Test {
         vm.prank(PLAYER);
         token.burn(1);
     }
+
+    function testFuzz_AuthorizedMintsAndHolderBurnConserveSupply(
+        uint256 playerAmount,
+        uint256 bootstrapAmount,
+        uint256 burnAmount
+    ) public {
+        playerAmount = bound(playerAmount, 1, type(uint128).max);
+        bootstrapAmount = bound(bootstrapAmount, 1, type(uint128).max);
+        burnAmount = bound(burnAmount, 1, playerAmount);
+
+        vm.prank(DIAMOND);
+        token.mintPlayerReward(PLAYER, playerAmount);
+        vm.prank(HOOK);
+        token.mintBootstrapPOL(address(token), bootstrapAmount);
+        vm.prank(PLAYER);
+        token.burn(burnAmount);
+
+        assertEq(token.balanceOf(PLAYER), playerAmount - burnAmount);
+        assertEq(token.balanceOf(address(token)), bootstrapAmount);
+        assertEq(token.totalSupply(), GENESIS_SUPPLY + playerAmount + bootstrapAmount - burnAmount);
+    }
+
+    function testFuzz_ArbitraryAccountCannotMint(address caller, address receiver, uint256 amount) public {
+        vm.assume(caller != DIAMOND && caller != HOOK);
+
+        vm.startPrank(caller);
+        vm.expectRevert(abi.encodeWithSelector(IActivationToken.UnauthorizedPlayerMinter.selector, caller));
+        token.mintPlayerReward(receiver, amount);
+        vm.expectRevert(abi.encodeWithSelector(IActivationToken.UnauthorizedBootstrapMinter.selector, caller));
+        token.mintBootstrapPOL(receiver, amount);
+        vm.stopPrank();
+
+        assertEq(token.totalSupply(), GENESIS_SUPPLY);
+        assertFalse(token.bootstrapMintExecuted());
+    }
+
+    function test_CompiledTokenExcludesAdministrativeSupplyControls() public view {
+        // The path is fixed by this test and access is read-only to generated Foundry output.
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        string memory artifact = vm.readFile("out/ActivationToken.sol/ActivationToken.json");
+        string[] memory signatures = vm.parseJsonKeys(artifact, ".methodIdentifiers");
+        assertEq(signatures.length, 16);
+
+        string[13] memory forbidden = [
+            "mint(address,uint256)",
+            "ownerMint(address,uint256)",
+            "mintTreasury(address,uint256)",
+            "mintGenesisTreasury(address,uint256)",
+            "mintGenesis(address,uint256)",
+            "treasuryMint(address,uint256)",
+            "burnFrom(address,uint256)",
+            "owner()",
+            "transferOwnership(address)",
+            "renounceOwnership()",
+            "pause()",
+            "unpause()",
+            "permit(address,address,uint256,uint256,uint8,bytes32,bytes32)"
+        ];
+
+        for (uint256 i; i < forbidden.length; ++i) {
+            assertFalse(_contains(signatures, forbidden[i]), forbidden[i]);
+        }
+    }
+
+    function _contains(string[] memory values, string memory target) private pure returns (bool) {
+        bytes32 targetHash = keccak256(bytes(target));
+        for (uint256 i; i < values.length; ++i) {
+            if (keccak256(bytes(values[i])) == targetHash) return true;
+        }
+        return false;
+    }
 }
