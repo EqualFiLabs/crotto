@@ -40,13 +40,16 @@ contract ProtocolFoundationTest is Test {
         assertEq(IPOLInitialization.initializePOL.selector, bytes4(keccak256("initializePOL()")));
     }
 
-    function test_ActivationTokenExposesOnlyRestrictedMintSelectors() public pure {
+    function test_ActivationTokenExposesGenesisSupplySelector() public pure {
         assertEq(IActivationToken.GENESIS_TREASURY_SUPPLY.selector, bytes4(keccak256("GENESIS_TREASURY_SUPPLY()")));
+    }
+
+    function test_ActivationTokenExposesOnlyRestrictedMintSelectors() public pure {
         assertEq(IActivationToken.mintPlayerReward.selector, bytes4(keccak256("mintPlayerReward(address,uint256)")));
         assertEq(IActivationToken.mintBootstrapPOL.selector, bytes4(keccak256("mintBootstrapPOL(address,uint256)")));
     }
 
-    function test_TreasuryReceiverExposesNoCustodySelectors() public pure {
+    function test_GovernanceExposesTreasuryReceiverWithoutCustodySelectors() public pure {
         assertEq(ICrottoGovernance.setTreasuryReceiver.selector, bytes4(keccak256("setTreasuryReceiver(address)")));
         assertEq(ICrottoGovernance.treasuryReceiver.selector, bytes4(keccak256("treasuryReceiver()")));
     }
