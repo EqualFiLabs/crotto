@@ -83,8 +83,7 @@ contract ConfigurationValidationTest is Test {
         assertEq(CrottoConstants.PAUSE_TICKET_PURCHASES, 1);
         assertEq(CrottoConstants.PAUSE_NFT_ACTIVATIONS, 2);
         assertEq(CrottoConstants.PAUSE_VAULT_PURCHASES, 4);
-        assertEq(CrottoConstants.PAUSE_CANONICAL_SWAPS, 8);
-        assertEq(CrottoConstants.ALL_PAUSE_FLAGS, 15);
+        assertEq(CrottoConstants.ALL_PAUSE_FLAGS, 7);
     }
 
     function test_ApprovedConfigurationsValidate() public view {
@@ -180,8 +179,8 @@ contract ConfigurationValidationTest is Test {
         harness.validateHookConfiguration(configuration, 99);
     }
 
-    function test_RevertWhen_PauseFlagsContainUnknownBit() public {
-        uint256 invalidFlags = CrottoConstants.ALL_PAUSE_FLAGS | (1 << 4);
+    function test_RevertWhen_CanonicalSwapPauseBitIsUsed() public {
+        uint256 invalidFlags = 1 << 3;
 
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidPauseFlags.selector, invalidFlags));
         harness.validatePauseFlags(invalidFlags);

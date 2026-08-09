@@ -23,6 +23,5 @@ library CrottoConstants {
     uint256 internal constant PAUSE_TICKET_PURCHASES = 1 << 0;
     uint256 internal constant PAUSE_NFT_ACTIVATIONS = 1 << 1;
     uint256 internal constant PAUSE_VAULT_PURCHASES = 1 << 2;
-    uint256 internal constant PAUSE_CANONICAL_SWAPS = 1 << 3;
-    uint256 internal constant ALL_PAUSE_FLAGS = (1 << 4) - 1;
+    uint256 internal constant ALL_PAUSE_FLAGS = (1 << 3) - 1;
 }
