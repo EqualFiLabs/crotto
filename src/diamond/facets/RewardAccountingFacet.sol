@@ -19,6 +19,12 @@ contract RewardAccountingFacet is CrottoFacet {
     error UnexpectedRewardTokenDebit(address asset, uint256 expected, uint256 actual);
     error UnexpectedRewardTokenReceipt(address asset, uint256 expected, uint256 actual);
 
+    /// @notice Pulls and indexes only the Reward NFT leg already allocated by the canonical hook.
+    /// @dev The hook transfers its treasury leg directly to the external Treasury Receiver before this call.
+    ///      `treasuryAmount` is emitted as reconciliation metadata and is never pulled or transferred here.
+    /// @param asset Configured WETH or ActivationToken reward asset.
+    /// @param rewardAmount Exact Reward NFT allocation to pull from the canonical hook and index.
+    /// @param treasuryAmount Treasury allocation already transferred directly by the canonical hook.
     function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount) external nonReentrant {
         LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
         address canonicalHook = governance.immutableConfiguration.canonicalHook;

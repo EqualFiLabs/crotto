@@ -88,6 +88,8 @@ library LibCrottoValidation {
         validateAllocation(config.polShareBps, config.nftShareBps, config.treasuryShareBps);
     }
 
+    /// @dev This remains `view` so `address(this)` resolves to the Diamond during delegatecall and prevents
+    ///      configuring protocol custody as its own exact-delta Treasury Receiver.
     function validateTreasuryReceiver(address receiver) internal view {
         _nonzero(receiver, "treasuryReceiver");
         if (receiver == address(this)) revert TreasuryReceiverIsProtocol(receiver);

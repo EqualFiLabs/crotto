@@ -29,6 +29,8 @@ interface ICrottoRewards {
 
     function onRewardNFTTransfer(address from, address to, uint256 tokenId) external;
 
+    /// @notice Pulls and indexes the Reward NFT allocation from the canonical hook.
+    /// @param treasuryAmount Treasury allocation already transferred directly by the hook; emitted for reconciliation.
     function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount) external;
 
     function totalActiveWeight() external view returns (uint256);
