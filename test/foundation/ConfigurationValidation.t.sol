@@ -52,6 +52,8 @@ contract ValidationHarness {
 
 contract ConfigurationValidationTest is Test {
     bytes32 private constant CANONICAL_HOOK_FIELD = "canonicalHook";
+    bytes32 private constant PLAYER_REWARD_RATE_FIELD = "playerRewardRate";
+    bytes32 private constant UNISWAP_V4_POOL_MANAGER_FIELD = "uniswapV4PoolManager";
     bytes32 private constant VAULT_PRICE_FIELD = "vaultPrice";
 
     ValidationHarness internal harness;
@@ -108,6 +110,22 @@ contract ConfigurationValidationTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroValue.selector, VAULT_PRICE_FIELD));
         harness.validateImmutableConfiguration(configuration);
+    }
+
+    function test_RevertWhen_UniswapV4PoolManagerIsZero() public {
+        ImmutableConfiguration memory configuration = _validImmutableConfiguration();
+        configuration.uniswapV4PoolManager = address(0);
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroAddress.selector, UNISWAP_V4_POOL_MANAGER_FIELD));
+        harness.validateImmutableConfiguration(configuration);
+    }
+
+    function test_RevertWhen_PlayerRewardRateIsZero() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.playerRewardRate = 0;
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroValue.selector, PLAYER_REWARD_RATE_FIELD));
+        harness.validateRoundConfiguration(configuration);
     }
 
     function test_RevertWhen_RoundAllocationDoesNotConserveValue() public {

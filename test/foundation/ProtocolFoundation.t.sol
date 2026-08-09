@@ -42,25 +42,35 @@ contract ProtocolFoundationTest is Test {
     function test_ActivationTokenExposesOnlyRestrictedMintSelectors() public pure {
         assertEq(IActivationToken.mintPlayerReward.selector, bytes4(keccak256("mintPlayerReward(address,uint256)")));
         assertEq(IActivationToken.mintBootstrapPOL.selector, bytes4(keccak256("mintBootstrapPOL(address,uint256)")));
-        assertTrue(IActivationToken.mintPlayerReward.selector != bytes4(keccak256("mint(address,uint256)")));
-        assertTrue(IActivationToken.mintBootstrapPOL.selector != bytes4(keccak256("mint(address,uint256)")));
     }
 
     function test_RewardNftExposesDiamondMintWithoutBurn() public pure {
         assertEq(IRewardNFT.mint.selector, bytes4(keccak256("mint(address)")));
-        assertTrue(IRewardNFT.mint.selector != bytes4(keccak256("burn(uint256)")));
-        assertTrue(IRewardNFT.mint.selector != bytes4(keccak256("publicMint(address)")));
     }
 
-    function test_VaultAndHookExcludeEscapePathSelectors() public pure {
-        bytes4 vaultPurchase = INFTVault.buyNewRewardNFT.selector;
-        assertTrue(vaultPurchase != bytes4(keccak256("withdrawBacking(address,uint256)")));
-        assertTrue(vaultPurchase != bytes4(keccak256("sweep(address,address,uint256)")));
+    function test_CompiledInterfacesExcludeForbiddenFunctions() public view {
+        assertEq(INFTVault.redeemRewardNFT.selector, bytes4(keccak256("redeemRewardNFT(uint256,address)")));
+        assertEq(
+            ICrottoSwapFeeHook.compoundPermanentLiquidity.selector, bytes4(keccak256("compoundPermanentLiquidity()"))
+        );
+        assertTrue(_artifactHasFunction("out/IActivationToken.sol/IActivationToken.json", "mintPlayerReward"));
+        assertTrue(_artifactHasFunction("out/IRewardNFT.sol/IRewardNFT.json", "mint"));
+        assertTrue(_artifactHasFunction("out/INFTVault.sol/INFTVault.json", "redeemRewardNFT"));
+        assertTrue(
+            _artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "compoundPermanentLiquidity")
+        );
 
-        bytes4 compound = ICrottoSwapFeeHook.compoundPermanentLiquidity.selector;
-        assertTrue(compound != bytes4(keccak256("decommissionPool()")));
-        assertTrue(compound != bytes4(keccak256("releasePermanentLiquidity(address)")));
-        assertTrue(compound != bytes4(keccak256("registerPool(bytes32)")));
+        _assertArtifactExcludes(
+            "out/IActivationToken.sol/IActivationToken.json", _names("mint", "ownerMint", "", "", "")
+        );
+        _assertArtifactExcludes("out/IRewardNFT.sol/IRewardNFT.json", _names("burn", "publicMint", "ownerMint", "", ""));
+        _assertArtifactExcludes(
+            "out/INFTVault.sol/INFTVault.json", _names("withdrawBacking", "sweep", "recoverToken", "", "")
+        );
+        _assertArtifactExcludes(
+            "out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json",
+            _names("decommissionPool", "releasePermanentLiquidity", "registerPool", "addLiquidity", "removeLiquidity")
+        );
     }
 
     function test_AccountingViewsRoundTripWithoutClassOverlap() public pure {
@@ -108,5 +118,50 @@ contract ProtocolFoundationTest is Test {
         assertEq(PoolId.unwrap(decodedPol.poolId), bytes32(uint256(18)));
         assertEq(decodedPol.pendingToken, 20);
         assertEq(decodedPol.pendingWeth, 21);
+    }
+
+    function _assertArtifactExcludes(string memory artifactPath, string[5] memory forbiddenNames) private view {
+        // Paths are fixed by this test and access is read-only to generated Foundry output.
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        string[] memory signatures = vm.parseJsonKeys(vm.readFile(artifactPath), ".methodIdentifiers");
+
+        for (uint256 i; i < signatures.length; ++i) {
+            for (uint256 j; j < forbiddenNames.length; ++j) {
+                if (bytes(forbiddenNames[j]).length == 0) continue;
+                assertFalse(_hasFunctionName(signatures[i], forbiddenNames[j]), forbiddenNames[j]);
+            }
+        }
+    }
+
+    function _artifactHasFunction(string memory artifactPath, string memory functionName) private view returns (bool) {
+        // Paths are fixed by this test and access is read-only to generated Foundry output.
+        // forge-lint: disable-next-line(unsafe-cheatcode)
+        string[] memory signatures = vm.parseJsonKeys(vm.readFile(artifactPath), ".methodIdentifiers");
+
+        for (uint256 i; i < signatures.length; ++i) {
+            if (_hasFunctionName(signatures[i], functionName)) return true;
+        }
+        return false;
+    }
+
+    function _hasFunctionName(string memory signature, string memory functionName) private pure returns (bool) {
+        bytes memory signatureBytes = bytes(signature);
+        bytes memory nameBytes = bytes(functionName);
+        if (signatureBytes.length <= nameBytes.length || signatureBytes[nameBytes.length] != "(") return false;
+
+        for (uint256 i; i < nameBytes.length; ++i) {
+            if (signatureBytes[i] != nameBytes[i]) return false;
+        }
+        return true;
+    }
+
+    function _names(
+        string memory first,
+        string memory second,
+        string memory third,
+        string memory fourth,
+        string memory fifth
+    ) private pure returns (string[5] memory names) {
+        names = [first, second, third, fourth, fifth];
     }
 }

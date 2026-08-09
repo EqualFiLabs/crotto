@@ -26,7 +26,7 @@ library LibCrottoValidation {
         _nonzero(config.rewardNFT, "rewardNFT");
         _nonzero(config.weth, "weth");
         _nonzero(config.vrfWrapper, "vrfWrapper");
-        _nonzero(config.uniswapV4PoolManager, "poolManager");
+        _nonzero(config.uniswapV4PoolManager, "uniswapV4PoolManager");
         _nonzero(config.canonicalHook, "canonicalHook");
         _positive(config.rewardNFTMaxSupply, "rewardNFTMaxSupply");
         _positive(config.vaultPrice, "vaultPrice");
@@ -43,6 +43,7 @@ library LibCrottoValidation {
     function validateRoundConfiguration(RoundConfiguration memory config) internal pure {
         _positive(config.ticketPrice, "ticketPrice");
         _positive(config.ticketOperationsFee, "ticketOperationsFee");
+        _positive(config.playerRewardRate, "playerRewardRate");
         _positive(config.ticketTarget, "ticketTarget");
         _positive(config.maxVrfCost, "maxVrfCost");
         _positive(config.vrfRetryDelay, "vrfRetryDelay");
