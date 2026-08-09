@@ -4,14 +4,14 @@ Crotto is an onchain lottery and economic primitive. Lottery participation emits
 Reward NFTs can be activated for revenue participation, and a canonical Uniswap v4 TOKEN/WETH pool grows permanently
 locked protocol-owned liquidity.
 
-This repository currently contains the protocol foundation: pinned dependencies, shared types and validation rules,
-and the public interfaces that future implementation facets and satellite contracts must satisfy. It does not yet
-contain deployable lottery, token, NFT, vault, or hook behavior.
+This repository currently contains the protocol foundation and the deployable ActivationToken satellite. The token
+mints its fixed genesis treasury supply during construction, restricts later emissions to the Diamond and canonical
+hook, and lets holders burn their own TOKEN. Lottery, NFT, vault, and hook behavior remain under development.
 
 ## Architecture
 
 - An EIP-2535 Diamond will own lottery, governance, reward accounting, vault, and POL initialization state.
-- `ActivationToken`, `RewardNFT`, and `CrottoSwapFeeHook` will be narrow satellite contracts controlled by the Diamond.
+- `ActivationToken`, `RewardNFT`, and `CrottoSwapFeeHook` are narrow satellite contracts controlled by the Diamond.
 - User-facing economic flows use WETH. Ticket purchases accept native ETH only to wrap it immediately; caller
   reimbursements and tips remain native ETH because Chainlink VRF is paid natively.
 - NFTVault redemption backing, lottery liabilities, RewardNFT rewards, treasury balances, and POL are isolated
