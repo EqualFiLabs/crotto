@@ -72,9 +72,10 @@ library LibCrottoGuard {
     }
 
     function finishRewardNFTTransfer() internal {
-        RewardNFTTransferContext storage context = layout().rewardNFTTransfer;
+        Layout storage state = layout();
+        RewardNFTTransferContext storage context = state.rewardNFTTransfer;
         if (!context.consumed) revert RewardNFTTransferCallbackNotConsumed();
-        delete layout().rewardNFTTransfer;
+        delete state.rewardNFTTransfer;
     }
 
     /// @return rootEntry True when this callback acquired the guard itself.
