@@ -12,6 +12,7 @@ import {OwnershipFacet} from "../../src/diamond/facets/OwnershipFacet.sol";
 import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondInit.sol";
 import {LibDiamond} from "../../src/diamond/libraries/LibDiamond.sol";
 import {CrottoTimelock} from "../../src/governance/CrottoTimelock.sol";
+import {RewardNFT} from "../../src/token/RewardNFT.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
@@ -161,6 +162,7 @@ contract DiamondGovernanceTest is Test {
 
     CrottoTimelock private timelock;
     GovernedHookProbe private hook;
+    RewardNFT private rewardNft;
     CrottoDiamond private diamond;
     ICrottoGovernance private governance;
     GovernanceStateProbeFacet private stateProbe;
@@ -193,6 +195,8 @@ contract DiamondGovernanceTest is Test {
         initialCut[4] = _facetCut(address(stateProbeImplementation), _stateProbeSelectors());
         initialCut[5] = _facetCut(address(pauseProbeImplementation), _pauseProbeSelectors());
 
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        rewardNft = new RewardNFT(predictedDiamond, 10_000);
         GovernanceInitialization memory initialization = _validInitialization();
         diamond = new CrottoDiamond(
             address(timelock),
@@ -209,6 +213,9 @@ contract DiamondGovernanceTest is Test {
         assertEq(IERC173(address(diamond)).owner(), address(timelock));
         assertTrue(stateProbe.initialized());
         assertEq(stateProbe.immutableConfiguration().canonicalHook, address(hook));
+        assertEq(stateProbe.immutableConfiguration().rewardNFT, address(rewardNft));
+        assertEq(rewardNft.crottoDiamond(), address(diamond));
+        assertEq(rewardNft.maxSupply(), stateProbe.immutableConfiguration().rewardNFTMaxSupply);
         assertEq(stateProbe.roundConfiguration().ticketTarget, 100);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 1);
@@ -222,22 +229,72 @@ contract DiamondGovernanceTest is Test {
     }
 
     function test_RevertWhen_ImmutableCanonicalHookHasNoCode() public {
-        DiamondCutFacet cutFacet = new DiamondCutFacet();
-        DiamondLoupeFacet loupeFacet = new DiamondLoupeFacet();
-        OwnershipFacet ownershipFacet = new OwnershipFacet();
-        GovernanceFacet governanceFacet = new GovernanceFacet();
-        CrottoDiamondInit initializer = new CrottoDiamondInit();
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
 
-        IDiamondCut.FacetCut[] memory initialCut = new IDiamondCut.FacetCut[](4);
-        initialCut[0] = _facetCut(address(cutFacet), _cutSelectors());
-        initialCut[1] = _facetCut(address(loupeFacet), _loupeSelectors());
-        initialCut[2] = _facetCut(address(ownershipFacet), _ownershipSelectors());
-        initialCut[3] = _facetCut(address(governanceFacet), _governanceSelectors());
-
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
         GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
         initialization.immutableConfiguration.canonicalHook = stranger;
 
         vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.CanonicalHookHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_ImmutableRewardNFTHasNoCode() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.RewardNFTHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_RewardNFTNamesDifferentDiamond() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+        RewardNFT mismatchedRewardNft = new RewardNFT(stranger, 10_000);
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(mismatchedRewardNft);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.RewardNFTDiamondMismatch.selector,
+                address(mismatchedRewardNft),
+                stranger,
+                predictedDiamond
+            )
+        );
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_RewardNFTMaxSupplyDiffers() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT mismatchedRewardNft = new RewardNFT(predictedDiamond, 9_999);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(mismatchedRewardNft);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.RewardNFTMaxSupplyMismatch.selector, address(mismatchedRewardNft), 10_000, 9_999
+            )
+        );
         new CrottoDiamond(
             address(timelock),
             initialCut,
@@ -507,7 +564,7 @@ contract DiamondGovernanceTest is Test {
         initialization = GovernanceInitialization({
             immutableConfiguration: ImmutableConfiguration({
                 activationToken: address(0x1001),
-                rewardNFT: address(0x1002),
+                rewardNFT: address(rewardNft),
                 weth: address(0x1003),
                 vrfWrapper: address(0x1004),
                 uniswapV4PoolManager: address(0x1005),
@@ -525,6 +582,23 @@ contract DiamondGovernanceTest is Test {
             treasuryReceiver: treasury,
             guardian: guardian
         });
+    }
+
+    function _governanceDeploymentParts()
+        private
+        returns (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer)
+    {
+        DiamondCutFacet cutFacet = new DiamondCutFacet();
+        DiamondLoupeFacet loupeFacet = new DiamondLoupeFacet();
+        OwnershipFacet ownershipFacet = new OwnershipFacet();
+        GovernanceFacet governanceFacet = new GovernanceFacet();
+        initializer = new CrottoDiamondInit();
+
+        initialCut = new IDiamondCut.FacetCut[](4);
+        initialCut[0] = _facetCut(address(cutFacet), _cutSelectors());
+        initialCut[1] = _facetCut(address(loupeFacet), _loupeSelectors());
+        initialCut[2] = _facetCut(address(ownershipFacet), _ownershipSelectors());
+        initialCut[3] = _facetCut(address(governanceFacet), _governanceSelectors());
     }
 
     function _validRoundConfiguration() private pure returns (RoundConfiguration memory configuration) {
