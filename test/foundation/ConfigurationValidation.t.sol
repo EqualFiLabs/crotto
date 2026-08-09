@@ -39,8 +39,11 @@ contract ValidationHarness {
         LibCrottoValidation.validateHookConfiguration(configuration, SafeCast.toUint16(maximumFeeBps));
     }
 
-    function validateTreasuryReceiver(address receiver) external view {
-        LibCrottoValidation.validateTreasuryReceiver(receiver);
+    function validateTreasuryReceiver(address receiver, ImmutableConfiguration calldata immutableConfiguration)
+        external
+        view
+    {
+        LibCrottoValidation.validateTreasuryReceiver(receiver, immutableConfiguration);
     }
 
     function validateAllocation(uint256 first, uint256 second, uint256 third) external pure {
@@ -101,20 +104,30 @@ contract ConfigurationValidationTest is Test {
         harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
         harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
-        harness.validateTreasuryReceiver(address(0x1007));
+        harness.validateTreasuryReceiver(address(0x1007), _validImmutableConfiguration());
         harness.validatePauseFlags(CrottoConstants.ALL_PAUSE_FLAGS);
     }
 
     function test_RevertWhen_TreasuryReceiverIsZero() public {
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroAddress.selector, TREASURY_RECEIVER_FIELD));
-        harness.validateTreasuryReceiver(address(0));
+        harness.validateTreasuryReceiver(address(0), _validImmutableConfiguration());
     }
 
     function test_RevertWhen_TreasuryReceiverIsProtocolCustody() public {
         vm.expectRevert(
             abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, address(harness))
         );
-        harness.validateTreasuryReceiver(address(harness));
+        harness.validateTreasuryReceiver(address(harness), _validImmutableConfiguration());
+    }
+
+    function test_RevertWhen_TreasuryReceiverIsProtocolSatellite() public {
+        ImmutableConfiguration memory immutableConfiguration = _validImmutableConfiguration();
+        address protocolSatellite = immutableConfiguration.activationToken;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, protocolSatellite)
+        );
+        harness.validateTreasuryReceiver(protocolSatellite, immutableConfiguration);
     }
 
     function test_RevertWhen_ImmutableAddressIsZero() public {

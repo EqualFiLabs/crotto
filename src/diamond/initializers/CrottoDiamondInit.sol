@@ -44,7 +44,9 @@ contract CrottoDiamondInit {
         LibCrottoValidation.validateHookConfiguration(
             initialization.hookConfiguration, initialization.immutableConfiguration.maxCombinedHookFeeBps
         );
-        LibCrottoValidation.validateTreasuryReceiver(initialization.treasuryReceiver);
+        LibCrottoValidation.validateTreasuryReceiver(
+            initialization.treasuryReceiver, initialization.immutableConfiguration
+        );
 
         _validateRewardNft(initialization);
 

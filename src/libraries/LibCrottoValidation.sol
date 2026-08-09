@@ -97,9 +97,14 @@ library LibCrottoValidation {
 
     /// @dev This remains `view` so `address(this)` resolves to the Diamond during delegatecall and prevents
     ///      configuring protocol custody as its own exact-delta Treasury Receiver.
-    function validateTreasuryReceiver(address receiver) internal view {
+    function validateTreasuryReceiver(address receiver, ImmutableConfiguration memory immutableConfig) internal view {
         _nonzero(receiver, "treasuryReceiver");
-        if (receiver == address(this)) revert TreasuryReceiverIsProtocol(receiver);
+        if (
+            receiver == address(this) || receiver == immutableConfig.activationToken
+                || receiver == immutableConfig.rewardNFT || receiver == immutableConfig.weth
+                || receiver == immutableConfig.vrfWrapper || receiver == immutableConfig.uniswapV4PoolManager
+                || receiver == immutableConfig.canonicalHook
+        ) revert TreasuryReceiverIsProtocol(receiver);
     }
 
     function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {
