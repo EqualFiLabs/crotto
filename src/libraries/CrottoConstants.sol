@@ -5,6 +5,7 @@ pragma solidity 0.8.33;
 library CrottoConstants {
     uint256 internal constant BPS = 10_000;
     uint256 internal constant RAY = 1e27;
+    uint256 internal constant GENESIS_TREASURY_SUPPLY = 10_000_000 ether;
 
     uint16 internal constant INITIAL_LOTTERY_WINNER_SHARE_BPS = 5_000;
     uint16 internal constant INITIAL_LOTTERY_NFT_SHARE_BPS = 4_000;
