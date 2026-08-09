@@ -27,8 +27,11 @@ contract ValidationHarness {
         LibCrottoValidation.validateBootstrapReachability(configuration, threshold);
     }
 
-    function validateActivationConfiguration(ActivationConfiguration calldata configuration) external pure {
-        LibCrottoValidation.validateActivationConfiguration(configuration);
+    function validateActivationConfiguration(ActivationConfiguration calldata configuration, uint256 maximumSupply)
+        external
+        pure
+    {
+        LibCrottoValidation.validateActivationConfiguration(configuration, maximumSupply);
     }
 
     function validateHookConfiguration(HookConfiguration calldata configuration, uint256 maximumFeeBps) external pure {
@@ -96,7 +99,7 @@ contract ConfigurationValidationTest is Test {
         harness.validateImmutableConfiguration(_validImmutableConfiguration());
         harness.validateRoundConfiguration(_validRoundConfiguration());
         harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
-        harness.validateActivationConfiguration(_validActivationConfiguration());
+        harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
         harness.validateTreasuryReceiver(address(0x1007));
         harness.validatePauseFlags(CrottoConstants.ALL_PAUSE_FLAGS);
@@ -180,7 +183,7 @@ contract ConfigurationValidationTest is Test {
         configuration.costs[1] = configuration.costs[0];
 
         vm.expectRevert(LibCrottoValidation.InvalidTierCosts.selector);
-        harness.validateActivationConfiguration(configuration);
+        harness.validateActivationConfiguration(configuration, 10_000);
     }
 
     function test_RevertWhen_ActivationWeightsAreNotIncreasing() public {
@@ -188,7 +191,30 @@ contract ConfigurationValidationTest is Test {
         configuration.destinationWeights[0] = 0;
 
         vm.expectRevert(LibCrottoValidation.InvalidTierWeights.selector);
-        harness.validateActivationConfiguration(configuration);
+        harness.validateActivationConfiguration(configuration, 10_000);
+    }
+
+    function test_MaximumActivationWeightAtAggregateCapacityValidates() public view {
+        uint256 maximumSupply = 10_000;
+        uint256 maximumWeight = type(uint256).max / maximumSupply;
+        ActivationConfiguration memory configuration = _validActivationConfiguration();
+        configuration.destinationWeights = [maximumWeight - 2, maximumWeight - 1, maximumWeight];
+
+        harness.validateActivationConfiguration(configuration, maximumSupply);
+    }
+
+    function test_RevertWhen_ActivationWeightExceedsAggregateCapacity() public {
+        uint256 maximumSupply = 10_000;
+        uint256 excessiveWeight = type(uint256).max / maximumSupply + 1;
+        ActivationConfiguration memory configuration = _validActivationConfiguration();
+        configuration.destinationWeights = [excessiveWeight - 2, excessiveWeight - 1, excessiveWeight];
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.ActivationWeightCapacityExceeded.selector, excessiveWeight, maximumSupply
+            )
+        );
+        harness.validateActivationConfiguration(configuration, maximumSupply);
     }
 
     function test_RevertWhen_HookFeeExceedsImmutableCeiling() public {

@@ -38,7 +38,9 @@ contract CrottoDiamondInit {
         LibCrottoValidation.validateBootstrapReachability(
             initialization.roundConfiguration, initialization.immutableConfiguration.requiredBootstrapWeth
         );
-        LibCrottoValidation.validateActivationConfiguration(initialization.activationConfiguration);
+        LibCrottoValidation.validateActivationConfiguration(
+            initialization.activationConfiguration, initialization.immutableConfiguration.rewardNFTMaxSupply
+        );
         LibCrottoValidation.validateHookConfiguration(
             initialization.hookConfiguration, initialization.immutableConfiguration.maxCombinedHookFeeBps
         );

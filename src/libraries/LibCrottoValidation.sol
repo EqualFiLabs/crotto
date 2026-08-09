@@ -16,6 +16,7 @@ library LibCrottoValidation {
     error InvalidAllocation(uint256 totalBps);
     error InvalidTierCosts();
     error InvalidTierWeights();
+    error ActivationWeightCapacityExceeded(uint256 maximumWeight, uint256 maximumSupply);
     error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
@@ -69,13 +70,19 @@ library LibCrottoValidation {
         }
     }
 
-    function validateActivationConfiguration(ActivationConfiguration memory config) internal pure {
+    function validateActivationConfiguration(ActivationConfiguration memory config, uint256 maximumSupply)
+        internal
+        pure
+    {
         if (!(config.costs[0] < config.costs[1] && config.costs[1] < config.costs[2])) {
             revert InvalidTierCosts();
         }
         if (!(config.destinationWeights[0] > 0 && config.destinationWeights[0] < config.destinationWeights[1]
                     && config.destinationWeights[1] < config.destinationWeights[2])) {
             revert InvalidTierWeights();
+        }
+        if (maximumSupply == 0 || config.destinationWeights[2] > type(uint256).max / maximumSupply) {
+            revert ActivationWeightCapacityExceeded(config.destinationWeights[2], maximumSupply);
         }
         validateAllocation(config.burnShareBps, config.nftShareBps, config.treasuryShareBps);
     }
