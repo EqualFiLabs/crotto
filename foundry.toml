@@ -15,6 +15,9 @@ via_ir = true
 line_length = 120
 tab_width = 4
 
+[lint]
+mixed_case_exceptions = ["ERC", "URI", "NFT", "POL", "WETH"]
+
 [fuzz]
 runs = 1000
 
