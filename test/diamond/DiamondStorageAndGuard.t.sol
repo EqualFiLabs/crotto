@@ -129,14 +129,14 @@ contract GuardHarnessFacet is CrottoFacet, IGuardHarness {
         bool callTwice
     ) external nonReentrant {
         _beginRewardNFTTransfer(expectedFrom, expectedTo, expectedTokenId);
-        MockRewardNFTCallbackCaller rewardNFT = _rewardNFT();
+        MockRewardNFTCallbackCaller rewardNFT = _rewardNft();
         rewardNFT.invoke(address(this), callbackFrom, callbackTo, callbackTokenId);
         if (callTwice) rewardNFT.invoke(address(this), callbackFrom, callbackTo, callbackTokenId);
         _finishRewardNFTTransfer();
     }
 
     function callbackInsideGuardWithoutScope(address from, address to, uint256 tokenId) external nonReentrant {
-        _rewardNFT().invoke(address(this), from, to, tokenId);
+        _rewardNft().invoke(address(this), from, to, tokenId);
     }
 
     function scopedWithoutCallback(address from, address to, uint256 tokenId) external nonReentrant {
@@ -148,7 +148,7 @@ contract GuardHarnessFacet is CrottoFacet, IGuardHarness {
         return GuardHarnessStorage.layout().callbackCount;
     }
 
-    function _rewardNFT() private view returns (MockRewardNFTCallbackCaller) {
+    function _rewardNft() private view returns (MockRewardNFTCallbackCaller) {
         return MockRewardNFTCallbackCaller(LibGovernanceStorage.layout().immutableConfiguration.rewardNFT);
     }
 }

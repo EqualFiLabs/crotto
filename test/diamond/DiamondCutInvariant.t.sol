@@ -48,14 +48,14 @@ contract MutableSelectorFacet {
 }
 
 contract DiamondCutHandler {
-    IDiamondCut private immutable diamondCut;
-    IDiamondLoupe private immutable loupe;
+    IDiamondCut private immutable DIAMOND_CUT;
+    IDiamondLoupe private immutable LOUPE;
     address[] private candidateFacets;
     bytes4[] private mutableSelectors;
 
     constructor(address diamond, address[] memory facets_, bytes4[] memory selectors_) {
-        diamondCut = IDiamondCut(diamond);
-        loupe = IDiamondLoupe(diamond);
+        DIAMOND_CUT = IDiamondCut(diamond);
+        LOUPE = IDiamondLoupe(diamond);
         candidateFacets = facets_;
         mutableSelectors = selectors_;
     }
@@ -63,7 +63,7 @@ contract DiamondCutHandler {
     function mutate(uint256 selectorSeed, uint256 facetSeed, uint256 actionSeed) external {
         bytes4 selector = mutableSelectors[selectorSeed % mutableSelectors.length];
         address targetFacet = candidateFacets[facetSeed % candidateFacets.length];
-        address currentFacet = loupe.facetAddress(selector);
+        address currentFacet = LOUPE.facetAddress(selector);
         uint256 action = actionSeed % 3;
 
         IDiamondCut.FacetCutAction cutAction;
@@ -85,7 +85,7 @@ contract DiamondCutHandler {
         selectors[0] = selector;
         IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](1);
         cuts[0] = IDiamondCut.FacetCut({facetAddress: cutFacetAddress, action: cutAction, functionSelectors: selectors});
-        diamondCut.diamondCut(cuts, address(0), "");
+        DIAMOND_CUT.diamondCut(cuts, address(0), "");
     }
 }
 

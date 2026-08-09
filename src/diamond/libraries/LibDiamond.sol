@@ -15,6 +15,7 @@ library LibDiamond {
     error ZeroAddress();
     error EmptyFacetCut();
     error FacetHasNoCode(address facet);
+    error FacetCannotBeDiamond();
     error SelectorAlreadyExists(bytes4 selector);
     error SelectorDoesNotExist(bytes4 selector);
     error CannotReplaceSelectorWithSameFacet(bytes4 selector, address facet);
@@ -125,7 +126,7 @@ library LibDiamond {
         if (facet == address(0)) revert ZeroAddress();
 
         DiamondStorage storage ds = diamondStorage();
-        _enforceHasCode(facet);
+        _enforceValidFacet(facet);
         _addFacetIfMissing(ds, facet);
 
         for (uint256 i; i < selectors.length; ++i) {
@@ -142,7 +143,7 @@ library LibDiamond {
         if (facet == address(0)) revert ZeroAddress();
 
         DiamondStorage storage ds = diamondStorage();
-        _enforceHasCode(facet);
+        _enforceValidFacet(facet);
 
         for (uint256 i; i < selectors.length; ++i) {
             bytes4 selector = selectors[i];
@@ -235,6 +236,11 @@ library LibDiamond {
 
     function _enforceHasCode(address account) private view {
         if (account.code.length == 0) revert FacetHasNoCode(account);
+    }
+
+    function _enforceValidFacet(address facet) private view {
+        if (facet == address(this)) revert FacetCannotBeDiamond();
+        _enforceHasCode(facet);
     }
 
     function _selectorInstalled(DiamondStorage storage ds, bytes4 selector) private view returns (bool) {

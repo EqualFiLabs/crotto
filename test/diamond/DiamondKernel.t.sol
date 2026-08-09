@@ -268,6 +268,14 @@ contract DiamondKernelTest is Test {
         _cut(address(cutFacet), IDiamondCut.FacetCutAction.Add, selectors, address(0), "");
     }
 
+    function test_RevertWhen_DiamondIsUsedAsFacet() public {
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = KernelFacetV1.value.selector;
+
+        vm.expectRevert(LibDiamond.FacetCannotBeDiamond.selector);
+        _cut(address(diamond), IDiamondCut.FacetCutAction.Add, selectors, address(0), "");
+    }
+
     function test_RevertWhen_InitializerPairIsMalformed() public {
         IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](0);
 

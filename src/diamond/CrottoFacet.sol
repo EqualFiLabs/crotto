@@ -12,6 +12,7 @@ abstract contract CrottoFacet {
         LibCrottoGuard.exit();
     }
 
+    // The callback's root-entry bit must span the facet body so the guard can be released correctly.
     // forge-lint: disable-next-line(unwrapped-modifier-logic)
     modifier onlyRewardNFTTransferCallback(address from, address to, uint256 tokenId) {
         address rewardNFT = LibGovernanceStorage.layout().immutableConfiguration.rewardNFT;
