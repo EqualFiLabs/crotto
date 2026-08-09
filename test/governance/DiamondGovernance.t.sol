@@ -427,6 +427,16 @@ contract DiamondGovernanceTest is Test {
         hook.setHookConfiguration(hookConfiguration);
     }
 
+    function test_RevertWhen_TimelockSetsDiamondAsTreasuryReceiver() public {
+        vm.prank(address(timelock));
+        vm.expectRevert(
+            abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, address(diamond))
+        );
+        governance.setTreasuryReceiver(address(diamond));
+
+        assertEq(governance.treasuryReceiver(), treasury);
+    }
+
     function test_InvalidGovernanceUpdatesRevertWithoutChangingState() public {
         RoundConfiguration memory originalRound = stateProbe.roundConfiguration();
         RoundConfiguration memory invalidRound = originalRound;

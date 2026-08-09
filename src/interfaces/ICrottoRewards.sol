@@ -7,6 +7,7 @@ import {NFTRewardPosition, RewardBook} from "../types/CrottoTypes.sol";
 interface ICrottoRewards {
     event RewardAccrued(address indexed asset, uint256 amount, uint256 indexRay, uint256 totalActiveWeight);
     event RewardSettled(uint256 indexed tokenId, uint256 wethAmount, uint256 tokenAmount);
+    event RewardDustRouted(address indexed asset, address indexed treasuryReceiver, uint256 amount);
     event NFTTierActivated(
         uint256 indexed tokenId,
         uint8 indexed previousTier,
@@ -28,6 +29,8 @@ interface ICrottoRewards {
 
     function onRewardNFTTransfer(address from, address to, uint256 tokenId) external;
 
+    /// @notice Pulls and indexes the Reward NFT allocation from the canonical hook.
+    /// @param treasuryAmount Treasury allocation already transferred directly by the hook; emitted for reconciliation.
     function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount) external;
 
     function totalActiveWeight() external view returns (uint256);

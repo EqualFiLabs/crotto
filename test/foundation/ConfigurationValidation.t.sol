@@ -36,7 +36,7 @@ contract ValidationHarness {
         LibCrottoValidation.validateHookConfiguration(configuration, SafeCast.toUint16(maximumFeeBps));
     }
 
-    function validateTreasuryReceiver(address receiver) external pure {
+    function validateTreasuryReceiver(address receiver) external view {
         LibCrottoValidation.validateTreasuryReceiver(receiver);
     }
 
@@ -105,6 +105,13 @@ contract ConfigurationValidationTest is Test {
     function test_RevertWhen_TreasuryReceiverIsZero() public {
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroAddress.selector, TREASURY_RECEIVER_FIELD));
         harness.validateTreasuryReceiver(address(0));
+    }
+
+    function test_RevertWhen_TreasuryReceiverIsProtocolCustody() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, address(harness))
+        );
+        harness.validateTreasuryReceiver(address(harness));
     }
 
     function test_RevertWhen_ImmutableAddressIsZero() public {
