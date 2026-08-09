@@ -9,6 +9,7 @@ interface IRewardNFT is IERC721Metadata {
     error InvalidMaxSupply();
     error UnauthorizedMinter(address caller);
     error MaxSupplyReached(uint256 maxSupply);
+    error DiamondCallbackUnavailable(address diamond);
 
     function mint(address receiver) external returns (uint256 tokenId);
 

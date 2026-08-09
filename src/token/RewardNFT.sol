@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {ERC721} from "@openzeppelin/contracts/token/ERC721/ERC721.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
+import {ICrottoRewards} from "../interfaces/ICrottoRewards.sol";
 import {IRewardNFT} from "../interfaces/IRewardNFT.sol";
 
 /// @notice Fixed-maximum-supply Crottos collection with Diamond-only sequential minting.
@@ -46,5 +47,17 @@ contract RewardNFT is ERC721, IRewardNFT {
     /// @inheritdoc IERC165
     function supportsInterface(bytes4 interfaceId) public view override(ERC721, IERC165) returns (bool) {
         return interfaceId == type(IRewardNFT).interfaceId || super.supportsInterface(interfaceId);
+    }
+
+    /// @dev Authenticates first, then requires the Diamond to settle/reset before ownership changes.
+    function _update(address to, uint256 tokenId, address auth) internal override returns (address from) {
+        from = _ownerOf(tokenId);
+        if (from == address(0)) return super._update(to, tokenId, auth);
+
+        if (auth != address(0)) _checkAuthorized(from, auth, tokenId);
+        if (CROTTO_DIAMOND.code.length == 0) revert DiamondCallbackUnavailable(CROTTO_DIAMOND);
+
+        ICrottoRewards(CROTTO_DIAMOND).onRewardNFTTransfer(from, to, tokenId);
+        super._update(to, tokenId, address(0));
     }
 }
