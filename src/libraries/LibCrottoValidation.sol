@@ -18,6 +18,7 @@ library LibCrottoValidation {
     error InvalidTierCosts();
     error InvalidTierWeights();
     error ActivationWeightCapacityExceeded(uint256 maximumWeight, uint256 maximumSupply);
+    error VaultBackingCapacityExceeded(uint256 vaultPrice, uint256 maximumSupply);
     error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
@@ -36,6 +37,10 @@ library LibCrottoValidation {
         _positive(config.requiredBootstrapWeth, "requiredBootstrapWeth");
         _positive(config.initialTokenPerWethWad, "initialTokenPerWethWad");
         _positive(config.maxCombinedHookFeeBps, "maxCombinedHookFeeBps");
+
+        if (config.vaultPrice > type(uint256).max / config.rewardNFTMaxSupply) {
+            revert VaultBackingCapacityExceeded(config.vaultPrice, config.rewardNFTMaxSupply);
+        }
 
         if (config.maxCombinedHookFeeBps > CrottoConstants.BPS) {
             revert InvalidHookFeeCeiling(config.maxCombinedHookFeeBps, CrottoConstants.BPS);

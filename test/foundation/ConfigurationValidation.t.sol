@@ -146,6 +146,21 @@ contract ConfigurationValidationTest is Test {
         harness.validateImmutableConfiguration(configuration);
     }
 
+    function test_RevertWhen_VaultBackingCanOverflowAtMaximumSupply() public {
+        ImmutableConfiguration memory configuration = _validImmutableConfiguration();
+        configuration.rewardNFTMaxSupply = 2;
+        configuration.vaultPrice = type(uint256).max / 2 + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.VaultBackingCapacityExceeded.selector,
+                configuration.vaultPrice,
+                configuration.rewardNFTMaxSupply
+            )
+        );
+        harness.validateImmutableConfiguration(configuration);
+    }
+
     function test_RevertWhen_UniswapV4PoolManagerIsZero() public {
         ImmutableConfiguration memory configuration = _validImmutableConfiguration();
         configuration.uniswapV4PoolManager = address(0);
