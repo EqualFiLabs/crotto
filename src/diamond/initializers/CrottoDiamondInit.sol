@@ -50,6 +50,9 @@ contract CrottoDiamondInit {
 
         LibCrottoValidation.validateImmutableConfiguration(initialization.immutableConfiguration);
         LibCrottoValidation.validateRoundConfiguration(initialization.roundConfiguration);
+        LibCrottoValidation.validateRoundBuybackCapacity(
+            initialization.roundConfiguration, initialization.immutableConfiguration.maxCombinedHookFeeBps
+        );
         LibCrottoValidation.validateBootstrapReachability(
             initialization.roundConfiguration, initialization.immutableConfiguration.requiredBootstrapWeth
         );
@@ -59,6 +62,7 @@ contract CrottoDiamondInit {
         LibCrottoValidation.validateHookConfiguration(
             initialization.hookConfiguration, initialization.immutableConfiguration.maxCombinedHookFeeBps
         );
+        LibCrottoValidation.validateBuybackConfiguration(initialization.buybackConfiguration);
         LibCrottoValidation.validateTreasuryReceiver(
             initialization.treasuryReceiver, initialization.immutableConfiguration
         );
@@ -84,6 +88,7 @@ contract CrottoDiamondInit {
         state.guardian = initialization.guardian;
         state.activationConfigurationVersion = 1;
         state.immutableConfigurationInitialized = true;
+        state.buybackConfiguration = initialization.buybackConfiguration;
 
         LibLottery.initializeFirstRound(initialization.roundConfiguration);
 
@@ -95,6 +100,7 @@ contract CrottoDiamondInit {
         emit ICrottoGovernance.RoundConfigurationSet(initialization.roundConfiguration);
         emit ICrottoGovernance.ActivationConfigurationSet(1, initialization.activationConfiguration);
         emit ICrottoGovernance.HookConfigurationSet(initialization.hookConfiguration);
+        emit ICrottoGovernance.BuybackConfigurationSet(initialization.buybackConfiguration);
         emit ICrottoGovernance.TreasuryReceiverChanged(address(0), initialization.treasuryReceiver);
         emit ICrottoGovernance.GuardianChanged(address(0), initialization.guardian);
     }
@@ -194,6 +200,7 @@ contract CrottoDiamondInit {
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setRoundConfiguration.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setActivationConfiguration.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setHookConfiguration.selector);
+        LibDiamond.enforceSelectorExists(ICrottoGovernance.setBuybackConfiguration.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setTreasuryReceiver.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setGuardian.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.pauseActions.selector);
@@ -201,5 +208,6 @@ contract CrottoDiamondInit {
         LibDiamond.enforceSelectorExists(ICrottoGovernance.treasuryReceiver.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.guardian.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.pausedActions.selector);
+        LibDiamond.enforceSelectorExists(ICrottoGovernance.buybackConfiguration.selector);
     }
 }

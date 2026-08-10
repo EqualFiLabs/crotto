@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {
     ActivationConfiguration,
+    BuybackConfiguration,
     HookConfiguration,
     ImmutableConfiguration,
     RoundConfiguration
@@ -23,6 +24,7 @@ library LibGovernanceStorage {
         uint64 activationConfigurationVersion;
         uint256 pausedActions;
         bool immutableConfigurationInitialized;
+        BuybackConfiguration buybackConfiguration;
     }
 
     function layout() internal pure returns (Layout storage state) {

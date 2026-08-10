@@ -26,6 +26,7 @@ import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.s
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
 import {
     ActivationConfiguration,
+    BuybackConfiguration,
     GovernanceInitialization,
     HookConfiguration,
     ImmutableConfiguration,
@@ -321,6 +322,7 @@ contract DiamondGovernanceTest is Test {
         assertEq(version, 1);
         assertEq(activation.costs[0], 100 ether);
         assertEq(stateProbe.hookConfiguration().inputFeeBps, 50);
+        assertEq(governance.buybackConfiguration().slippageBps, 500);
         assertEq(hook.configuration().inputFeeBps, 50);
         assertEq(hook.lastCaller(), address(diamond));
         assertEq(governance.treasuryReceiver(), treasury);
@@ -606,6 +608,8 @@ contract DiamondGovernanceTest is Test {
         nextHook.inputFeeBps = 75;
         nextHook.outputFeeBps = 75;
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setHookConfiguration, (nextHook)));
+        BuybackConfiguration memory nextBuyback = BuybackConfiguration({slippageBps: 750});
+        _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setBuybackConfiguration, (nextBuyback)));
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setTreasuryReceiver, (nextTreasury)));
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setGuardian, (nextGuardian)));
 
@@ -621,6 +625,7 @@ contract DiamondGovernanceTest is Test {
         assertEq(activation.destinationWeights[0], 10);
         assertEq(stateProbe.storedWeight(11), 99);
         assertEq(stateProbe.hookConfiguration().inputFeeBps, 75);
+        assertEq(governance.buybackConfiguration().slippageBps, 750);
         assertEq(hook.configuration().inputFeeBps, 75);
         assertEq(hook.lastCaller(), address(diamond));
         assertEq(governance.treasuryReceiver(), nextTreasury);
@@ -686,7 +691,7 @@ contract DiamondGovernanceTest is Test {
         invalidRound.ticketOperationsFee = 0.07 ether;
         vm.prank(address(timelock));
         vm.expectRevert(
-            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 3 ether, 30 ether)
+            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 4 ether, 30 ether)
         );
         governance.setRoundConfiguration(invalidRound);
 
@@ -918,7 +923,8 @@ contract DiamondGovernanceTest is Test {
             activationConfiguration: _validActivationConfiguration(),
             hookConfiguration: _validHookConfiguration(),
             treasuryReceiver: treasury,
-            guardian: guardian
+            guardian: guardian,
+            buybackConfiguration: BuybackConfiguration({slippageBps: 500})
         });
     }
 
@@ -999,17 +1005,19 @@ contract DiamondGovernanceTest is Test {
     }
 
     function _governanceSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](10);
+        selectors = new bytes4[](12);
         selectors[0] = ICrottoGovernance.setRoundConfiguration.selector;
         selectors[1] = ICrottoGovernance.setActivationConfiguration.selector;
         selectors[2] = ICrottoGovernance.setHookConfiguration.selector;
         selectors[3] = ICrottoGovernance.setTreasuryReceiver.selector;
-        selectors[4] = ICrottoGovernance.setGuardian.selector;
-        selectors[5] = ICrottoGovernance.pauseActions.selector;
-        selectors[6] = ICrottoGovernance.unpauseActions.selector;
-        selectors[7] = ICrottoGovernance.treasuryReceiver.selector;
-        selectors[8] = ICrottoGovernance.guardian.selector;
-        selectors[9] = ICrottoGovernance.pausedActions.selector;
+        selectors[4] = ICrottoGovernance.setBuybackConfiguration.selector;
+        selectors[5] = ICrottoGovernance.setGuardian.selector;
+        selectors[6] = ICrottoGovernance.pauseActions.selector;
+        selectors[7] = ICrottoGovernance.unpauseActions.selector;
+        selectors[8] = ICrottoGovernance.treasuryReceiver.selector;
+        selectors[9] = ICrottoGovernance.guardian.selector;
+        selectors[10] = ICrottoGovernance.pausedActions.selector;
+        selectors[11] = ICrottoGovernance.buybackConfiguration.selector;
     }
 
     function _stateProbeSelectors() private pure returns (bytes4[] memory selectors) {

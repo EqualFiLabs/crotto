@@ -29,6 +29,14 @@ abstract contract CrottoFacet {
         LibCrottoGuard.exitRewardNFTTransferCallback(rootEntry);
     }
 
+    modifier onlyCanonicalHookRevenueCallback(address asset) {
+        LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
+        bool rootEntry =
+            LibCrottoGuard.enterCanonicalHookRevenueCallback(governance.immutableConfiguration.canonicalHook, asset);
+        _;
+        LibCrottoGuard.exitCanonicalHookRevenueCallback(rootEntry);
+    }
+
     // forge-lint: disable-next-line(mixed-case-function)
     function _beginRewardNFTTransfer(address from, address to, uint256 tokenId) internal {
         address rewardNFT = LibGovernanceStorage.layout().immutableConfiguration.rewardNFT;

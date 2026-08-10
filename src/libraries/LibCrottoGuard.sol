@@ -17,6 +17,12 @@ library LibCrottoGuard {
     );
     error RewardNFTTransferCallbackNotConsumed();
     error RewardNFTTransferContextNotCleared();
+    error CanonicalHookRevenueContextAlreadyActive();
+    error CanonicalHookRevenueContextNotActive();
+    error CanonicalHookRevenueContextNotCleared();
+    error UnauthorizedCanonicalHookCallback(address caller, address expectedHook);
+    error UnexpectedCanonicalHookRevenueAsset(address asset);
+    error DuplicateCanonicalHookRevenueAsset(address asset);
 
     // forge-lint: disable-next-line(pascal-case-struct)
     struct RewardNFTTransferContext {
@@ -28,10 +34,19 @@ library LibCrottoGuard {
         bool consumed;
     }
 
+    struct CanonicalHookRevenueContext {
+        address hook;
+        address weth;
+        address token;
+        uint8 routedAssets;
+        bool active;
+    }
+
     /// @custom:storage-location erc7201:crotto.storage.Guard
     struct Layout {
         uint256 status;
         RewardNFTTransferContext rewardNFTTransfer;
+        CanonicalHookRevenueContext canonicalHookRevenue;
     }
 
     function layout() internal pure returns (Layout storage state) {
@@ -55,6 +70,7 @@ library LibCrottoGuard {
         Layout storage state = layout();
         RewardNFTTransferContext storage context = state.rewardNFTTransfer;
         if (context.active || context.consumed) revert RewardNFTTransferContextNotCleared();
+        if (state.canonicalHookRevenue.active) revert CanonicalHookRevenueContextNotCleared();
         state.status = NOT_ENTERED;
     }
 
@@ -107,6 +123,47 @@ library LibCrottoGuard {
         if (state.rewardNFTTransfer.active || state.rewardNFTTransfer.consumed) {
             revert RewardNFTTransferContextNotCleared();
         }
+        state.status = NOT_ENTERED;
+    }
+
+    function beginCanonicalHookRevenue(address hook, address weth, address token) internal {
+        Layout storage state = layout();
+        if (state.status != ENTERED) revert CanonicalHookRevenueContextNotActive();
+        if (state.canonicalHookRevenue.active) revert CanonicalHookRevenueContextAlreadyActive();
+        state.canonicalHookRevenue =
+            CanonicalHookRevenueContext({hook: hook, weth: weth, token: token, routedAssets: 0, active: true});
+    }
+
+    function finishCanonicalHookRevenue() internal {
+        Layout storage state = layout();
+        if (!state.canonicalHookRevenue.active) revert CanonicalHookRevenueContextNotActive();
+        delete state.canonicalHookRevenue;
+    }
+
+    /// @return rootEntry True when an ordinary outside swap acquired the guard itself.
+    function enterCanonicalHookRevenueCallback(address hook, address asset) internal returns (bool rootEntry) {
+        if (msg.sender != hook) revert UnauthorizedCanonicalHookCallback(msg.sender, hook);
+
+        Layout storage state = layout();
+        if (state.status != ENTERED) {
+            state.status = ENTERED;
+            return true;
+        }
+
+        CanonicalHookRevenueContext storage context = state.canonicalHookRevenue;
+        if (!context.active || context.hook != hook) revert CanonicalHookRevenueContextNotActive();
+        uint8 assetBit;
+        if (asset == context.weth) assetBit = 1;
+        else if (asset == context.token) assetBit = 2;
+        else revert UnexpectedCanonicalHookRevenueAsset(asset);
+        if ((context.routedAssets & assetBit) != 0) revert DuplicateCanonicalHookRevenueAsset(asset);
+        context.routedAssets |= assetBit;
+    }
+
+    function exitCanonicalHookRevenueCallback(bool rootEntry) internal {
+        if (!rootEntry) return;
+        Layout storage state = layout();
+        if (state.canonicalHookRevenue.active) revert CanonicalHookRevenueContextNotCleared();
         state.status = NOT_ENTERED;
     }
 }

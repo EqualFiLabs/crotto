@@ -5,9 +5,9 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {ICrotto} from "../../interfaces/ICrotto.sol";
+import {LibAutomaticBuyback} from "../../libraries/LibAutomaticBuyback.sol";
 import {CrottoConstants} from "../../libraries/CrottoConstants.sol";
 import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
-import {LibBuybackStorage} from "../../libraries/storage/LibBuybackStorage.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
@@ -61,17 +61,16 @@ contract LotteryTicketFacet is CrottoFacet {
         currentRound.winnerPoolWeth += winnerAmount;
         lottery.totalWinnerPoolWethLiability += winnerAmount;
         LibTreasuryStorage.layout().operationsReserveEth += operationsContribution;
-        LibBuybackStorage.Layout storage buyback = LibBuybackStorage.layout();
-        buyback.wethReserve += buybackAmount;
-        buyback.totalTicketsSold += quantity;
-
-        if (LibRewardsStorage.layout().totalActiveWeight != 0) {
+        bool activeRewardNfts = LibRewardsStorage.layout().totalActiveWeight != 0;
+        bool polInitialized = LibPOLStorage.layout().initialized;
+        if (activeRewardNfts) {
             _accrueNftWethRewards(nftAmount);
-        } else if (!LibPOLStorage.layout().initialized) {
+        } else if (!polInitialized) {
             LibPOLStorage.layout().bootstrapWeth += nftAmount;
         } else {
             treasuryAmount += nftAmount;
         }
+        if (!polInitialized) LibPOLStorage.layout().bootstrapWeth += buybackAmount;
 
         if (endTicketExclusive == currentRound.config.ticketTarget) currentRound.status = RoundStatus.Closed;
 
@@ -84,6 +83,10 @@ contract LotteryTicketFacet is CrottoFacet {
 
         LibAssetTransfer.pushExact(weth, LibGovernanceStorage.layout().treasuryReceiver, treasuryAmount);
 
+        if (polInitialized) {
+            LibAutomaticBuyback.execute(roundId, msg.sender, buybackAmount);
+        }
+
         emit ICrotto.TicketsPurchased(
             roundId,
             msg.sender,
@@ -93,7 +96,7 @@ contract LotteryTicketFacet is CrottoFacet {
             ticketValue,
             operationsContribution,
             buybackAmount,
-            buyback.totalTicketsSold
+            !polInitialized
         );
         if (currentRound.status == RoundStatus.Closed) emit ICrotto.RoundClosed(roundId, endTicketExclusive);
     }

@@ -8,6 +8,7 @@ import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
 import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
 import {
     ActivationConfiguration,
+    BuybackConfiguration,
     HookConfiguration,
     ImmutableConfiguration,
     RoundConfiguration
@@ -22,6 +23,18 @@ contract ValidationHarness {
 
     function validateRoundConfiguration(RoundConfiguration calldata configuration) external pure {
         LibCrottoValidation.validateRoundConfiguration(configuration);
+    }
+
+    function validateRoundBuybackCapacity(RoundConfiguration calldata configuration, uint256 maximumInputFeeBps)
+        external
+        pure
+    {
+        if (maximumInputFeeBps > type(uint16).max) revert HarnessValueOutOfBounds(maximumInputFeeBps);
+        LibCrottoValidation.validateRoundBuybackCapacity(configuration, SafeCast.toUint16(maximumInputFeeBps));
+    }
+
+    function validateBuybackConfiguration(BuybackConfiguration calldata configuration) external pure {
+        LibCrottoValidation.validateBuybackConfiguration(configuration);
     }
 
     function validateBootstrapReachability(RoundConfiguration calldata configuration, uint256 threshold) external pure {
@@ -133,6 +146,7 @@ contract ConfigurationValidationTest is Test {
         assertEq(CrottoConstants.INITIAL_HOOK_POL_SHARE_BPS, 5_000);
         assertEq(CrottoConstants.INITIAL_HOOK_NFT_SHARE_BPS, 4_000);
         assertEq(CrottoConstants.INITIAL_HOOK_TREASURY_SHARE_BPS, 1_000);
+        assertEq(CrottoConstants.INITIAL_BUYBACK_SLIPPAGE_BPS, 500);
 
         assertEq(CrottoConstants.PAUSE_TICKET_PURCHASES, 1);
         assertEq(CrottoConstants.PAUSE_NFT_ACTIVATIONS, 2);
@@ -143,7 +157,9 @@ contract ConfigurationValidationTest is Test {
     function test_ApprovedConfigurationsValidate() public view {
         harness.validateImmutableConfiguration(_validImmutableConfiguration());
         harness.validateRoundConfiguration(_validRoundConfiguration());
-        harness.validateBootstrapReachability(_validRoundConfiguration(), 30 ether);
+        harness.validateRoundBuybackCapacity(_validRoundConfiguration(), 200);
+        harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
+        harness.validateBuybackConfiguration(_validBuybackConfiguration());
         harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
         harness.validateTreasuryReceiver(address(0x1007), _validImmutableConfiguration());
@@ -337,9 +353,9 @@ contract ConfigurationValidationTest is Test {
         RoundConfiguration memory configuration = _validRoundConfiguration();
 
         vm.expectRevert(
-            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 30 ether, 31 ether)
+            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 40 ether, 41 ether)
         );
-        harness.validateBootstrapReachability(configuration, 31 ether);
+        harness.validateBootstrapReachability(configuration, 41 ether);
     }
 
     function test_RevertWhen_PerPurchaseRoundingPreventsBootstrapReachability() public {
@@ -395,6 +411,36 @@ contract ConfigurationValidationTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidHookFeeCeiling.selector, 100, 99));
         harness.validateHookConfiguration(configuration, 99);
+    }
+
+    function test_RevertWhen_BuybackCannotProduceSpecifiedInput() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketPrice = 9;
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InsufficientBuybackExecutionAmount.selector, 0, 200));
+        harness.validateRoundBuybackCapacity(configuration, 200);
+    }
+
+    function test_RevertWhen_MaximumInputFeeConsumesTheBuybackBudget() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        uint256 grossWeth = configuration.ticketPrice * configuration.buybackShareBps / CrottoConstants.BPS;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.InsufficientBuybackExecutionAmount.selector, grossWeth, uint16(CrottoConstants.BPS)
+            )
+        );
+        harness.validateRoundBuybackCapacity(configuration, CrottoConstants.BPS);
+    }
+
+    function test_RevertWhen_BuybackSlippageIsZeroOrComplete() public {
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidBuybackSlippage.selector, 0));
+        harness.validateBuybackConfiguration(BuybackConfiguration({slippageBps: 0}));
+
+        vm.expectRevert(
+            abi.encodeWithSelector(LibCrottoValidation.InvalidBuybackSlippage.selector, CrottoConstants.BPS)
+        );
+        harness.validateBuybackConfiguration(BuybackConfiguration({slippageBps: uint16(CrottoConstants.BPS)}));
     }
 
     function test_RevertWhen_CanonicalSwapPauseBitIsUsed() public {
@@ -476,5 +522,9 @@ contract ConfigurationValidationTest is Test {
             nftShareBps: CrottoConstants.INITIAL_HOOK_NFT_SHARE_BPS,
             treasuryShareBps: CrottoConstants.INITIAL_HOOK_TREASURY_SHARE_BPS
         });
+    }
+
+    function _validBuybackConfiguration() private pure returns (BuybackConfiguration memory configuration) {
+        configuration.slippageBps = CrottoConstants.INITIAL_BUYBACK_SLIPPAGE_BPS;
     }
 }

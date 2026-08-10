@@ -81,7 +81,7 @@ contract StorageHarnessFacet {
         LibVaultStorage.layout().tokenBacking = seed + 4;
         LibTreasuryStorage.layout().operationsReserveEth = seed + 5;
         LibPOLStorage.layout().bootstrapWeth = seed + 6;
-        LibBuybackStorage.layout().wethReserve = seed + 7;
+        LibBuybackStorage.layout().__reservedLegacyWethReserve = seed + 7;
     }
 
     function sentinels() external view returns (uint256[7] memory values) {
@@ -91,7 +91,7 @@ contract StorageHarnessFacet {
         values[3] = LibVaultStorage.layout().tokenBacking;
         values[4] = LibTreasuryStorage.layout().operationsReserveEth;
         values[5] = LibPOLStorage.layout().bootstrapWeth;
-        values[6] = LibBuybackStorage.layout().wethReserve;
+        values[6] = LibBuybackStorage.layout().__reservedLegacyWethReserve;
     }
 
     function storageSlots() external pure returns (bytes32[9] memory slots) {
@@ -126,6 +126,31 @@ contract StorageHarnessFacet {
             legacyToken := sload(add(slot, 1))
         }
         operationsReserve = LibTreasuryStorage.layout().operationsReserveEth;
+    }
+
+    function seedLegacyBuybackWords(uint256 wethReserve, uint256 totalTicketsSold, uint256 ticketsAtLastBuyback)
+        external
+    {
+        bytes32 slot = LibBuybackStorage.storageSlot();
+        assembly ("memory-safe") {
+            sstore(slot, wethReserve)
+            sstore(add(slot, 1), totalTicketsSold)
+            sstore(add(slot, 2), ticketsAtLastBuyback)
+        }
+    }
+
+    function buybackStorageWords()
+        external
+        view
+        returns (uint256 wethReserve, uint256 totalTicketsSold, uint256 ticketsAtLastBuyback, bytes32 executionHash)
+    {
+        LibBuybackStorage.Layout storage state = LibBuybackStorage.layout();
+        return (
+            state.__reservedLegacyWethReserve,
+            state.__reservedLegacyTotalTicketsSold,
+            state.__reservedLegacyTicketsAtLastBuyback,
+            state.activeExecutionHash
+        );
     }
 }
 
@@ -249,6 +274,18 @@ contract DiamondStorageAndGuardTest is Test {
         assertEq(operationsReserve, 33);
     }
 
+    function test_LegacyBuybackWordsRemainReservedAheadOfExecutionContext() public {
+        StorageHarnessFacet harness = StorageHarnessFacet(address(diamond));
+        harness.seedLegacyBuybackWords(11, 22, 33);
+
+        (uint256 wethReserve, uint256 totalTicketsSold, uint256 ticketsAtLastBuyback, bytes32 executionHash) =
+            harness.buybackStorageWords();
+        assertEq(wethReserve, 11);
+        assertEq(totalTicketsSold, 22);
+        assertEq(ticketsAtLastBuyback, 33);
+        assertEq(executionHash, bytes32(0));
+    }
+
     function test_CrossFacetReentrancyRevertsAndGuardRecovers() public {
         vm.expectRevert(LibCrottoGuard.ReentrantCall.selector);
         IGuardHarness(address(diamond)).reenterGuardedIncrement();
@@ -358,13 +395,15 @@ contract DiamondStorageAndGuardTest is Test {
     }
 
     function _storageHarnessSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](6);
+        selectors = new bytes4[](8);
         selectors[0] = StorageHarnessFacet.configureRewardNFT.selector;
         selectors[1] = StorageHarnessFacet.writeSentinels.selector;
         selectors[2] = StorageHarnessFacet.sentinels.selector;
         selectors[3] = StorageHarnessFacet.storageSlots.selector;
         selectors[4] = StorageHarnessFacet.seedLegacyTreasuryWords.selector;
         selectors[5] = StorageHarnessFacet.treasuryStorageWords.selector;
+        selectors[6] = StorageHarnessFacet.seedLegacyBuybackWords.selector;
+        selectors[7] = StorageHarnessFacet.buybackStorageWords.selector;
     }
 
     function _guardHarnessSelectors() private pure returns (bytes4[] memory selectors) {

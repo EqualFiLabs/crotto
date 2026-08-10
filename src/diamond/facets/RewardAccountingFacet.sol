@@ -20,7 +20,10 @@ contract RewardAccountingFacet is CrottoFacet {
     /// @param asset Configured WETH or ActivationToken reward asset.
     /// @param rewardAmount Exact Reward NFT allocation to pull from the canonical hook and index.
     /// @param treasuryAmount Treasury allocation already transferred directly by the canonical hook.
-    function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount) external nonReentrant {
+    function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount)
+        external
+        onlyCanonicalHookRevenueCallback(asset)
+    {
         LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
         address canonicalHook = governance.immutableConfiguration.canonicalHook;
         if (msg.sender != canonicalHook) revert UnauthorizedCanonicalHook(msg.sender, canonicalHook);
