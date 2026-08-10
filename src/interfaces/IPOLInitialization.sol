@@ -16,6 +16,8 @@ interface IPOLInitialization {
 
     function polInitialized() external view returns (bool);
 
+    function polInitializationAuthorized() external view returns (bool);
+
     function bootstrapPolWeth() external view returns (uint256);
 
     function requiredBootstrapWeth() external view returns (uint256);

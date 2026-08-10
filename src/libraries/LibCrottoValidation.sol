@@ -2,7 +2,9 @@
 pragma solidity 0.8.33;
 
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {CrottoConstants} from "./CrottoConstants.sol";
+import {LibCanonicalPool} from "./LibCanonicalPool.sol";
 import {LibDiamond} from "../diamond/libraries/LibDiamond.sol";
 import {
     ActivationConfiguration,
@@ -25,6 +27,7 @@ library LibCrottoValidation {
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
     error PlayerRewardLiabilityCapacityExceeded(uint256 rewardRate, uint256 ticketTarget);
     error TicketPaymentCapacityExceeded(uint256 ticketPrice, uint256 operationsFee, uint256 ticketTarget);
+    error InvalidCanonicalTickSpacing(int24 tickSpacing);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
 
@@ -50,7 +53,13 @@ library LibCrottoValidation {
         if (config.maxCombinedHookFeeBps > CrottoConstants.BPS) {
             revert InvalidHookFeeCeiling(config.maxCombinedHookFeeBps, CrottoConstants.BPS);
         }
-        if (config.canonicalTickSpacing <= 0) revert ZeroValue("canonicalTickSpacing");
+        if (
+            config.canonicalTickSpacing < TickMath.MIN_TICK_SPACING
+                || config.canonicalTickSpacing > TickMath.MAX_TICK_SPACING
+        ) revert InvalidCanonicalTickSpacing(config.canonicalTickSpacing);
+
+        LibCanonicalPool.bootstrapTokenAmount(config.requiredBootstrapWeth, config.initialTokenPerWethWad);
+        LibCanonicalPool.sqrtPriceX96(config.activationToken, config.weth, config.initialTokenPerWethWad);
     }
 
     function validateRoundConfiguration(RoundConfiguration memory config) internal pure {
