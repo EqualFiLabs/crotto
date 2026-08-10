@@ -89,6 +89,10 @@ contract ProtocolFoundationTest is Test {
             _names("withdrawTreasuryWeth", "withdrawTreasuryToken", "setTreasury", "treasury", "")
         );
         _assertArtifactExcludes(
+            "out/ICrotto.sol/ICrotto.json",
+            _names("withdrawTreasuryWeth", "withdrawTreasuryToken", "claimTreasury", "spendTreasury", "")
+        );
+        _assertArtifactExcludes(
             "out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json",
             _names("decommissionPool", "releasePermanentLiquidity", "registerPool", "addLiquidity", "removeLiquidity")
         );

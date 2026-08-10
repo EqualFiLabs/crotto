@@ -138,6 +138,7 @@ contract LotteryTicketingTest is Test {
     LotteryTicketFacet private ticketing;
     LotteryViewFacet private views;
     LotteryTicketStateFacet private stateView;
+    ICrottoGovernance private governance;
 
     function setUp() public {
         vm.chainId(31_337);
@@ -178,6 +179,7 @@ contract LotteryTicketingTest is Test {
         ticketing = LotteryTicketFacet(address(diamond));
         views = LotteryViewFacet(address(diamond));
         stateView = LotteryTicketStateFacet(address(diamond));
+        governance = ICrottoGovernance(address(diamond));
         vm.deal(player, 100 ether);
     }
 
@@ -238,6 +240,18 @@ contract LotteryTicketingTest is Test {
         assertEq(buybackReserve, 10);
         assertEq(weth.balanceOf(treasury), 41);
         assertEq(weth.balanceOf(address(diamond)), 60);
+    }
+
+    function test_TreasuryReceiverChangeAppliesOnlyToFuturePurchases() public {
+        address nextTreasury = makeAddr("nextTreasury");
+        _buy(player, 1);
+        uint256 deliveredBeforeChange = weth.balanceOf(treasury);
+
+        governance.setTreasuryReceiver(nextTreasury);
+        _buy(player, 1);
+
+        assertEq(weth.balanceOf(treasury), deliveredBeforeChange);
+        assertEq(weth.balanceOf(nextTreasury), deliveredBeforeChange);
     }
 
     function test_ExactSelloutClosesRoundAndRejectsFurtherPurchases() public {
