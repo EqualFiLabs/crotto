@@ -32,7 +32,9 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         LibDiamond.enforceIsContractOwner();
         LibGovernanceStorage.Layout storage state = _governanceState();
 
-        LibCrottoValidation.validateActivationConfiguration(configuration);
+        LibCrottoValidation.validateActivationConfiguration(
+            configuration, state.immutableConfiguration.rewardNFTMaxSupply
+        );
         state.activationConfiguration = configuration;
         uint64 version = ++state.activationConfigurationVersion;
 
@@ -57,7 +59,7 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         LibDiamond.enforceIsContractOwner();
         LibGovernanceStorage.Layout storage state = _governanceState();
 
-        LibCrottoValidation.validateTreasuryReceiver(newReceiver);
+        LibCrottoValidation.validateTreasuryReceiver(newReceiver, state.immutableConfiguration);
         address previousReceiver = state.treasuryReceiver;
         state.treasuryReceiver = newReceiver;
 

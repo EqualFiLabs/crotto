@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CrottoConstants} from "./CrottoConstants.sol";
+import {LibDiamond} from "../diamond/libraries/LibDiamond.sol";
 import {
     ActivationConfiguration,
     HookConfiguration,
@@ -16,6 +17,8 @@ library LibCrottoValidation {
     error InvalidAllocation(uint256 totalBps);
     error InvalidTierCosts();
     error InvalidTierWeights();
+    error ActivationWeightCapacityExceeded(uint256 maximumWeight, uint256 maximumSupply);
+    error VaultBackingCapacityExceeded(uint256 vaultPrice, uint256 maximumSupply);
     error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
@@ -34,6 +37,10 @@ library LibCrottoValidation {
         _positive(config.requiredBootstrapWeth, "requiredBootstrapWeth");
         _positive(config.initialTokenPerWethWad, "initialTokenPerWethWad");
         _positive(config.maxCombinedHookFeeBps, "maxCombinedHookFeeBps");
+
+        if (config.vaultPrice > type(uint256).max / config.rewardNFTMaxSupply) {
+            revert VaultBackingCapacityExceeded(config.vaultPrice, config.rewardNFTMaxSupply);
+        }
 
         if (config.maxCombinedHookFeeBps > CrottoConstants.BPS) {
             revert InvalidHookFeeCeiling(config.maxCombinedHookFeeBps, CrottoConstants.BPS);
@@ -69,13 +76,19 @@ library LibCrottoValidation {
         }
     }
 
-    function validateActivationConfiguration(ActivationConfiguration memory config) internal pure {
+    function validateActivationConfiguration(ActivationConfiguration memory config, uint256 maximumSupply)
+        internal
+        pure
+    {
         if (!(config.costs[0] < config.costs[1] && config.costs[1] < config.costs[2])) {
             revert InvalidTierCosts();
         }
         if (!(config.destinationWeights[0] > 0 && config.destinationWeights[0] < config.destinationWeights[1]
                     && config.destinationWeights[1] < config.destinationWeights[2])) {
             revert InvalidTierWeights();
+        }
+        if (maximumSupply == 0 || config.destinationWeights[2] > type(uint256).max / maximumSupply) {
+            revert ActivationWeightCapacityExceeded(config.destinationWeights[2], maximumSupply);
         }
         validateAllocation(config.burnShareBps, config.nftShareBps, config.treasuryShareBps);
     }
@@ -90,9 +103,21 @@ library LibCrottoValidation {
 
     /// @dev This remains `view` so `address(this)` resolves to the Diamond during delegatecall and prevents
     ///      configuring protocol custody as its own exact-delta Treasury Receiver.
-    function validateTreasuryReceiver(address receiver) internal view {
+    function validateTreasuryReceiver(address receiver, ImmutableConfiguration memory immutableConfig) internal view {
         _nonzero(receiver, "treasuryReceiver");
-        if (receiver == address(this)) revert TreasuryReceiverIsProtocol(receiver);
+        if (isProtocolAddress(receiver, immutableConfig)) revert TreasuryReceiverIsProtocol(receiver);
+    }
+
+    function isProtocolAddress(address candidate, ImmutableConfiguration memory immutableConfig)
+        internal
+        view
+        returns (bool)
+    {
+        return candidate == address(this) || candidate == immutableConfig.activationToken
+            || candidate == immutableConfig.rewardNFT || candidate == immutableConfig.weth
+            || candidate == immutableConfig.vrfWrapper || candidate == immutableConfig.uniswapV4PoolManager
+            || candidate == immutableConfig.canonicalHook
+            || LibDiamond.diamondStorage().facetFunctionSelectors[candidate].functionSelectors.length != 0;
     }
 
     function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {

@@ -27,8 +27,11 @@ contract ValidationHarness {
         LibCrottoValidation.validateBootstrapReachability(configuration, threshold);
     }
 
-    function validateActivationConfiguration(ActivationConfiguration calldata configuration) external pure {
-        LibCrottoValidation.validateActivationConfiguration(configuration);
+    function validateActivationConfiguration(ActivationConfiguration calldata configuration, uint256 maximumSupply)
+        external
+        pure
+    {
+        LibCrottoValidation.validateActivationConfiguration(configuration, maximumSupply);
     }
 
     function validateHookConfiguration(HookConfiguration calldata configuration, uint256 maximumFeeBps) external pure {
@@ -36,8 +39,11 @@ contract ValidationHarness {
         LibCrottoValidation.validateHookConfiguration(configuration, SafeCast.toUint16(maximumFeeBps));
     }
 
-    function validateTreasuryReceiver(address receiver) external view {
-        LibCrottoValidation.validateTreasuryReceiver(receiver);
+    function validateTreasuryReceiver(address receiver, ImmutableConfiguration calldata immutableConfiguration)
+        external
+        view
+    {
+        LibCrottoValidation.validateTreasuryReceiver(receiver, immutableConfiguration);
     }
 
     function validateAllocation(uint256 first, uint256 second, uint256 third) external pure {
@@ -96,22 +102,32 @@ contract ConfigurationValidationTest is Test {
         harness.validateImmutableConfiguration(_validImmutableConfiguration());
         harness.validateRoundConfiguration(_validRoundConfiguration());
         harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
-        harness.validateActivationConfiguration(_validActivationConfiguration());
+        harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
-        harness.validateTreasuryReceiver(address(0x1007));
+        harness.validateTreasuryReceiver(address(0x1007), _validImmutableConfiguration());
         harness.validatePauseFlags(CrottoConstants.ALL_PAUSE_FLAGS);
     }
 
     function test_RevertWhen_TreasuryReceiverIsZero() public {
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroAddress.selector, TREASURY_RECEIVER_FIELD));
-        harness.validateTreasuryReceiver(address(0));
+        harness.validateTreasuryReceiver(address(0), _validImmutableConfiguration());
     }
 
     function test_RevertWhen_TreasuryReceiverIsProtocolCustody() public {
         vm.expectRevert(
             abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, address(harness))
         );
-        harness.validateTreasuryReceiver(address(harness));
+        harness.validateTreasuryReceiver(address(harness), _validImmutableConfiguration());
+    }
+
+    function test_RevertWhen_TreasuryReceiverIsProtocolSatellite() public {
+        ImmutableConfiguration memory immutableConfiguration = _validImmutableConfiguration();
+        address protocolSatellite = immutableConfiguration.activationToken;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, protocolSatellite)
+        );
+        harness.validateTreasuryReceiver(protocolSatellite, immutableConfiguration);
     }
 
     function test_RevertWhen_ImmutableAddressIsZero() public {
@@ -127,6 +143,21 @@ contract ConfigurationValidationTest is Test {
         configuration.vaultPrice = 0;
 
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroValue.selector, VAULT_PRICE_FIELD));
+        harness.validateImmutableConfiguration(configuration);
+    }
+
+    function test_RevertWhen_VaultBackingCanOverflowAtMaximumSupply() public {
+        ImmutableConfiguration memory configuration = _validImmutableConfiguration();
+        configuration.rewardNFTMaxSupply = 2;
+        configuration.vaultPrice = type(uint256).max / 2 + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.VaultBackingCapacityExceeded.selector,
+                configuration.vaultPrice,
+                configuration.rewardNFTMaxSupply
+            )
+        );
         harness.validateImmutableConfiguration(configuration);
     }
 
@@ -180,7 +211,7 @@ contract ConfigurationValidationTest is Test {
         configuration.costs[1] = configuration.costs[0];
 
         vm.expectRevert(LibCrottoValidation.InvalidTierCosts.selector);
-        harness.validateActivationConfiguration(configuration);
+        harness.validateActivationConfiguration(configuration, 10_000);
     }
 
     function test_RevertWhen_ActivationWeightsAreNotIncreasing() public {
@@ -188,7 +219,30 @@ contract ConfigurationValidationTest is Test {
         configuration.destinationWeights[0] = 0;
 
         vm.expectRevert(LibCrottoValidation.InvalidTierWeights.selector);
-        harness.validateActivationConfiguration(configuration);
+        harness.validateActivationConfiguration(configuration, 10_000);
+    }
+
+    function test_MaximumActivationWeightAtAggregateCapacityValidates() public view {
+        uint256 maximumSupply = 10_000;
+        uint256 maximumWeight = type(uint256).max / maximumSupply;
+        ActivationConfiguration memory configuration = _validActivationConfiguration();
+        configuration.destinationWeights = [maximumWeight - 2, maximumWeight - 1, maximumWeight];
+
+        harness.validateActivationConfiguration(configuration, maximumSupply);
+    }
+
+    function test_RevertWhen_ActivationWeightExceedsAggregateCapacity() public {
+        uint256 maximumSupply = 10_000;
+        uint256 excessiveWeight = type(uint256).max / maximumSupply + 1;
+        ActivationConfiguration memory configuration = _validActivationConfiguration();
+        configuration.destinationWeights = [excessiveWeight - 2, excessiveWeight - 1, excessiveWeight];
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.ActivationWeightCapacityExceeded.selector, excessiveWeight, maximumSupply
+            )
+        );
+        harness.validateActivationConfiguration(configuration, maximumSupply);
     }
 
     function test_RevertWhen_HookFeeExceedsImmutableCeiling() public {

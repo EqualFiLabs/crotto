@@ -21,7 +21,7 @@ interface ICrottoRewards {
     event NFTRewardClaimed(uint256 indexed tokenId, address indexed asset, address indexed receiver, uint256 amount);
     event HookRevenueRouted(address indexed asset, uint256 rewardAmount, uint256 treasuryAmount);
 
-    function activateNextTier(uint256 tokenId) external;
+    function activateNextTier(uint256 tokenId, uint64 expectedConfigurationVersion, uint256 maximumCost) external;
 
     function claimNFTWethReward(uint256 tokenId, address receiver) external returns (uint256 amount);
 

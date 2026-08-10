@@ -9,6 +9,7 @@ import {IDiamondCut} from "../../interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../interfaces/diamond/IERC173.sol";
 import {ICrottoGovernance} from "../../interfaces/ICrottoGovernance.sol";
+import {IActivationToken} from "../../interfaces/IActivationToken.sol";
 import {IRewardNFT} from "../../interfaces/IRewardNFT.sol";
 import {ICrottoSwapFeeHook} from "../../interfaces/ICrottoSwapFeeHook.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
@@ -23,6 +24,9 @@ contract CrottoDiamondInit {
     error RewardNFTUnsupportedInterface(address rewardNft);
     error RewardNFTDiamondMismatch(address rewardNft, address configuredDiamond, address expectedDiamond);
     error RewardNFTMaxSupplyMismatch(address rewardNft, uint256 configuredMaxSupply, uint256 actualMaxSupply);
+    error ActivationTokenHasNoCode(address token);
+    error ActivationTokenDiamondMismatch(address token, address configuredDiamond, address expectedDiamond);
+    error ActivationTokenHookMismatch(address token, address configuredHook, address expectedHook);
 
     function initialize() external {
         _validateCoreSelectors();
@@ -38,16 +42,21 @@ contract CrottoDiamondInit {
         LibCrottoValidation.validateBootstrapReachability(
             initialization.roundConfiguration, initialization.immutableConfiguration.requiredBootstrapWeth
         );
-        LibCrottoValidation.validateActivationConfiguration(initialization.activationConfiguration);
+        LibCrottoValidation.validateActivationConfiguration(
+            initialization.activationConfiguration, initialization.immutableConfiguration.rewardNFTMaxSupply
+        );
         LibCrottoValidation.validateHookConfiguration(
             initialization.hookConfiguration, initialization.immutableConfiguration.maxCombinedHookFeeBps
         );
-        LibCrottoValidation.validateTreasuryReceiver(initialization.treasuryReceiver);
+        LibCrottoValidation.validateTreasuryReceiver(
+            initialization.treasuryReceiver, initialization.immutableConfiguration
+        );
 
         _validateRewardNft(initialization);
 
         address hook = initialization.immutableConfiguration.canonicalHook;
         if (hook.code.length == 0) revert CanonicalHookHasNoCode(hook);
+        _validateActivationToken(initialization);
 
         LibGovernanceStorage.Layout storage state = LibGovernanceStorage.layout();
         state.immutableConfiguration = initialization.immutableConfiguration;
@@ -69,6 +78,22 @@ contract CrottoDiamondInit {
         emit ICrottoGovernance.HookConfigurationSet(initialization.hookConfiguration);
         emit ICrottoGovernance.TreasuryReceiverChanged(address(0), initialization.treasuryReceiver);
         emit ICrottoGovernance.GuardianChanged(address(0), initialization.guardian);
+    }
+
+    function _validateActivationToken(GovernanceInitialization calldata initialization) private view {
+        address token = initialization.immutableConfiguration.activationToken;
+        if (token.code.length == 0) revert ActivationTokenHasNoCode(token);
+
+        address configuredDiamond = IActivationToken(token).crottoDiamond();
+        if (configuredDiamond != address(this)) {
+            revert ActivationTokenDiamondMismatch(token, configuredDiamond, address(this));
+        }
+
+        address expectedHook = initialization.immutableConfiguration.canonicalHook;
+        address configuredHook = IActivationToken(token).canonicalHook();
+        if (configuredHook != expectedHook) {
+            revert ActivationTokenHookMismatch(token, configuredHook, expectedHook);
+        }
     }
 
     function _validateRewardNft(GovernanceInitialization calldata initialization) private view {
