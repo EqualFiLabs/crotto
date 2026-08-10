@@ -24,7 +24,10 @@ import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
 import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
 import {LibRewardAccounting} from "../../src/libraries/LibRewardAccounting.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
+import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
+import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
+import {LibVaultStorage} from "../../src/libraries/storage/LibVaultStorage.sol";
 import {CrottoSwapFeeHook} from "../../src/liquidity/CrottoSwapFeeHook.sol";
 import {ActivationToken} from "../../src/token/ActivationToken.sol";
 import {HookConfiguration} from "../../src/types/CrottoTypes.sol";
@@ -66,6 +69,88 @@ contract CrottoHookController is RewardAccountingFacet {
     function routedRewards(address asset) external view returns (uint256) {
         LibRewardsStorage.Layout storage state = LibRewardsStorage.layout();
         return asset == weth ? state.wethBook.indexedAmount : state.tokenBook.indexedAmount;
+    }
+
+    function seedIsolatedAccounting(address caller) external {
+        // Direct sentinel writes keep this storage-isolation check narrow; the fee path itself still uses the real hook,
+        // PoolManager, currencies, and permanent position.
+        LibRewardsStorage.Layout storage rewards = LibRewardsStorage.layout();
+        rewards.wethBook.indexRay = 9;
+        rewards.wethBook.indexRemainder = 10;
+        rewards.wethBook.indexedAmount = 11;
+        rewards.wethBook.crystallizedAmount = 12;
+        rewards.wethBook.totalClaimable = 13;
+        rewards.tokenBook.indexRay = 19;
+        rewards.tokenBook.indexRemainder = 20;
+        rewards.tokenBook.indexedAmount = 21;
+        rewards.tokenBook.crystallizedAmount = 22;
+        rewards.tokenBook.totalClaimable = 23;
+        rewards.totalActiveWeight = 24;
+
+        LibVaultStorage.layout().tokenBacking = 31;
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        lottery.currentRoundId = 41;
+        lottery.totalWinnerPoolWethLiability = 42;
+        lottery.totalPlayerTokenLiability = 43;
+        lottery.rounds[41].ticketCount = 44;
+        lottery.rounds[41].winnerPoolWeth = 45;
+        lottery.rounds[41].totalPlayerRewardLiability = 46;
+        lottery.rounds[41].unclaimedPlayerRewardLiability = 47;
+        lottery.playerTicketCounts[41][caller] = 48;
+        lottery.playerRewardClaimed[41][caller] = true;
+
+        LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        treasury.__reservedLegacyTreasuryWeth = 49;
+        treasury.__reservedLegacyTreasuryToken = 50;
+        treasury.operationsReserveEth = 51;
+        treasury.totalCallerCreditsEth = 52;
+        treasury.callerCreditsEth[caller] = 53;
+        treasury.callerRewardCredited[keccak256("isolated-accounting")] = true;
+    }
+
+    function isolatedAccountingDigest(address caller) external view returns (bytes32) {
+        LibRewardsStorage.Layout storage rewards = LibRewardsStorage.layout();
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        bytes32 rewardDigest = keccak256(
+            abi.encode(
+                rewards.wethBook.indexRay,
+                rewards.wethBook.indexRemainder,
+                rewards.wethBook.indexedAmount,
+                rewards.wethBook.crystallizedAmount,
+                rewards.wethBook.totalClaimable,
+                rewards.tokenBook.indexRay,
+                rewards.tokenBook.indexRemainder,
+                rewards.tokenBook.indexedAmount,
+                rewards.tokenBook.crystallizedAmount,
+                rewards.tokenBook.totalClaimable,
+                rewards.totalActiveWeight
+            )
+        );
+        bytes32 lotteryDigest = keccak256(
+            abi.encode(
+                lottery.currentRoundId,
+                lottery.totalWinnerPoolWethLiability,
+                lottery.totalPlayerTokenLiability,
+                lottery.rounds[41].ticketCount,
+                lottery.rounds[41].winnerPoolWeth,
+                lottery.rounds[41].totalPlayerRewardLiability,
+                lottery.rounds[41].unclaimedPlayerRewardLiability,
+                lottery.playerTicketCounts[41][caller],
+                lottery.playerRewardClaimed[41][caller]
+            )
+        );
+        bytes32 treasuryDigest = keccak256(
+            abi.encode(
+                treasury.__reservedLegacyTreasuryWeth,
+                treasury.__reservedLegacyTreasuryToken,
+                treasury.operationsReserveEth,
+                treasury.totalCallerCreditsEth,
+                treasury.callerCreditsEth[caller],
+                treasury.callerRewardCredited[keccak256("isolated-accounting")]
+            )
+        );
+        return keccak256(abi.encode(rewardDigest, LibVaultStorage.layout().tokenBacking, lotteryDigest, treasuryDigest));
     }
 
     function initialize(PoolKey calldata key, uint160 sqrtPriceX96, uint256 tokenAmount, uint256 wethAmount)
@@ -236,6 +321,7 @@ contract CrottoSwapFeeHookTest is Test {
 
     function test_ExternalLiquidityAdditionsAndRemovalsAlwaysRevert() public {
         _initialize(REQUIRED_WETH);
+        uint128 lockedBefore = hook.lockedLiquidity();
         ModifyLiquidityParams memory add = ModifyLiquidityParams({
             tickLower: TickMath.minUsableTick(TICK_SPACING),
             tickUpper: TickMath.maxUsableTick(TICK_SPACING),
@@ -251,6 +337,7 @@ contract CrottoSwapFeeHookTest is Test {
             )
         );
         modifyLiquidityRouter.modifyLiquidity(canonicalKey, add, "");
+        assertEq(hook.lockedLiquidity(), lockedBefore);
 
         add.liquidityDelta = -1;
         vm.expectRevert(
@@ -260,6 +347,7 @@ contract CrottoSwapFeeHookTest is Test {
             )
         );
         modifyLiquidityRouter.modifyLiquidity(canonicalKey, add, "");
+        assertEq(hook.lockedLiquidity(), lockedBefore);
     }
 
     function test_PermissionlessOneAndTwoAssetDonationsCreateNoWithdrawablePosition() public {
@@ -280,6 +368,38 @@ contract CrottoSwapFeeHookTest is Test {
         hook.donatePOL(0, 0);
     }
 
+    function test_TokenHeavyDonationKeepsUnmatchedValueForLaterCompounding() public {
+        _initialize(REQUIRED_WETH);
+        uint128 liquidityBefore = hook.lockedLiquidity();
+
+        hook.donatePOL(500_000 ether, 0);
+        uint256 unmatchedToken = hook.pendingPermanentLiquidity(Currency.wrap(address(token)));
+        assertGt(unmatchedToken, 400_000 ether);
+
+        _mintWeth(1 ether);
+        hook.donatePOL(0, 1 ether);
+        assertGt(hook.lockedLiquidity(), liquidityBefore);
+        assertLt(hook.pendingPermanentLiquidity(Currency.wrap(address(token))), unmatchedToken);
+        _assertPendingSolvent(Currency.wrap(address(token)));
+        _assertPendingSolvent(Currency.wrap(address(wethToken)));
+    }
+
+    function test_WethHeavyDonationKeepsUnmatchedValueForLaterCompounding() public {
+        _initialize(REQUIRED_WETH);
+        uint128 liquidityBefore = hook.lockedLiquidity();
+        _mintWeth(50 ether);
+
+        hook.donatePOL(0, 50 ether);
+        uint256 unmatchedWeth = hook.pendingPermanentLiquidity(Currency.wrap(address(wethToken)));
+        assertGt(unmatchedWeth, 49 ether);
+
+        hook.donatePOL(1_000 ether, 0);
+        assertGt(hook.lockedLiquidity(), liquidityBefore);
+        assertLt(hook.pendingPermanentLiquidity(Currency.wrap(address(wethToken))), unmatchedWeth);
+        _assertPendingSolvent(Currency.wrap(address(token)));
+        _assertPendingSolvent(Currency.wrap(address(wethToken)));
+    }
+
     function test_BackupCompoundingCollectsDonatedPositionFeesIntoPermanentLiquidity() public {
         _initialize(REQUIRED_WETH);
         uint128 liquidityBefore = hook.lockedLiquidity();
@@ -293,6 +413,28 @@ contract CrottoSwapFeeHookTest is Test {
 
         assertGt(liquidityAdded, 0);
         assertGt(hook.lockedLiquidity(), liquidityBefore);
+        _assertPendingSolvent(Currency.wrap(address(token)));
+        _assertPendingSolvent(Currency.wrap(address(wethToken)));
+    }
+
+    function test_PermanentPositionFeesRemainPOLAndLeaveOtherBooksUntouched() public {
+        _initialize(REQUIRED_WETH);
+        controller.seedIsolatedAccounting(address(this));
+        bytes32 accountingBefore = controller.isolatedAccountingDigest(address(this));
+        address treasury = controller.treasuryReceiver();
+        uint256 treasuryTokenBefore = token.balanceOf(treasury);
+        uint256 treasuryWethBefore = wethToken.balanceOf(treasury);
+        uint256 pendingTokenBefore = hook.pendingPermanentLiquidity(Currency.wrap(address(token)));
+
+        uint256 positionFee = 100_000 ether;
+        bool tokenIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(token);
+        donateRouter.donate(canonicalKey, tokenIsCurrency0 ? positionFee : 0, tokenIsCurrency0 ? 0 : positionFee, "");
+        hook.compoundPOL();
+
+        assertGt(hook.pendingPermanentLiquidity(Currency.wrap(address(token))), pendingTokenBefore);
+        assertEq(controller.isolatedAccountingDigest(address(this)), accountingBefore);
+        assertEq(token.balanceOf(treasury), treasuryTokenBefore);
+        assertEq(wethToken.balanceOf(treasury), treasuryWethBefore);
         _assertPendingSolvent(Currency.wrap(address(token)));
         _assertPendingSolvent(Currency.wrap(address(wethToken)));
     }
