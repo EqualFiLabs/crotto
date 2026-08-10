@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
 import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
+import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
 import {
     ActivationConfiguration,
     HookConfiguration,
@@ -219,6 +220,32 @@ contract ConfigurationValidationTest is Test {
         configuration.uniswapV4PoolManager = address(0);
 
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroAddress.selector, UNISWAP_V4_POOL_MANAGER_FIELD));
+        harness.validateImmutableConfiguration(configuration);
+    }
+
+    function test_RevertWhen_CanonicalAssetsAreEqual() public {
+        ImmutableConfiguration memory configuration = _validImmutableConfiguration();
+        configuration.weth = configuration.activationToken;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCanonicalPool.InvalidCanonicalAssets.selector,
+                configuration.activationToken,
+                configuration.activationToken
+            )
+        );
+        harness.validateImmutableConfiguration(configuration);
+    }
+
+    function test_RevertWhen_CanonicalTickSpacingExceedsV4Bound() public {
+        ImmutableConfiguration memory configuration = _validImmutableConfiguration();
+        configuration.canonicalTickSpacing = int24(type(int16).max) + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.InvalidCanonicalTickSpacing.selector, configuration.canonicalTickSpacing
+            )
+        );
         harness.validateImmutableConfiguration(configuration);
     }
 

@@ -41,16 +41,44 @@ contract GovernedHookProbe {
     error ConfigurationRejected();
 
     address public diamond;
+    address public activationToken;
+    address public weth;
+    address public poolManager;
+    int24 public canonicalTickSpacing;
+    uint256 public initialTokenPerWethWad;
+    uint16 public maxCombinedHookFeeBps;
     address public lastCaller;
     bool public rejectConfiguration;
     HookConfiguration private storedConfiguration;
+
+    function configureBindings(
+        address diamond_,
+        address token_,
+        address weth_,
+        address manager_,
+        int24 tickSpacing_,
+        uint256 ratio_,
+        uint16 feeCeiling_
+    ) external {
+        require(diamond == address(0));
+        diamond = diamond_;
+        activationToken = token_;
+        weth = weth_;
+        poolManager = manager_;
+        canonicalTickSpacing = tickSpacing_;
+        initialTokenPerWethWad = ratio_;
+        maxCombinedHookFeeBps = feeCeiling_;
+    }
+
+    function crottoDiamond() external view returns (address) {
+        return diamond;
+    }
 
     function setRejectConfiguration(bool reject) external {
         rejectConfiguration = reject;
     }
 
     function setHookConfiguration(HookConfiguration calldata newConfiguration) external {
-        if (diamond == address(0)) diamond = msg.sender;
         if (msg.sender != diamond) revert UnauthorizedDiamond(msg.sender, diamond);
         if (rejectConfiguration) revert ConfigurationRejected();
         lastCaller = msg.sender;
@@ -259,6 +287,9 @@ contract DiamondGovernanceTest is Test {
         address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         rewardNft = new RewardNFT(predictedDiamond, 10_000);
         activationToken = new ActivationToken(treasury, predictedDiamond, address(hook));
+        hook.configureBindings(
+            predictedDiamond, address(activationToken), address(weth), address(0x1005), 60, 10_000 ether, 200
+        );
         GovernanceInitialization memory initialization = _validInitialization();
         diamond = new CrottoDiamond(
             address(timelock),
@@ -307,6 +338,38 @@ contract DiamondGovernanceTest is Test {
         initialization.immutableConfiguration.canonicalHook = stranger;
 
         vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.CanonicalHookHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_CanonicalHookPoolManagerBindingMismatches() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 3);
+        GovernedHookProbe mismatchedHook = new GovernedHookProbe();
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        ActivationToken matchingToken = new ActivationToken(treasury, predictedDiamond, address(mismatchedHook));
+        mismatchedHook.configureBindings(
+            predictedDiamond, address(matchingToken), address(weth), stranger, 60, 10_000 ether, 200
+        );
+
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.activationToken = address(matchingToken);
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+        initialization.immutableConfiguration.canonicalHook = address(mismatchedHook);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.CanonicalHookPoolManagerMismatch.selector,
+                address(mismatchedHook),
+                stranger,
+                address(0x1005)
+            )
+        );
         new CrottoDiamond(
             address(timelock),
             initialCut,
