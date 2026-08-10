@@ -57,7 +57,7 @@ contract LotteryVRFFacet is CrottoFacet {
     }
 
     /// @notice Chainlink wrapper callback; malformed or obsolete fulfillments are deliberately non-reverting.
-    function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external {
+    function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external nonReentrant {
         LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
         address expectedWrapper = governance.immutableConfiguration.vrfWrapper;
         if (msg.sender != expectedWrapper) revert UnauthorizedVrfWrapper(msg.sender, expectedWrapper);
