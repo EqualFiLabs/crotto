@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {CrottoDiamond} from "../../src/diamond/CrottoDiamond.sol";
 import {CrottoFacet} from "../../src/diamond/CrottoFacet.sol";
@@ -74,6 +75,14 @@ contract NFTVaultHarnessFacet is CrottoFacet {
         LibGovernanceStorage.layout().pausedActions = paused ? CrottoConstants.PAUSE_VAULT_PURCHASES : 0;
     }
 }
+
+contract VaultNftReceiver is IERC721Receiver {
+    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
+    }
+}
+
+contract VaultNonReceiver {}
 
 contract NFTVaultTest is Test {
     uint256 private constant MAXIMUM_SUPPLY = 3;
@@ -179,6 +188,39 @@ contract NFTVaultTest is Test {
         vm.expectRevert(NFTVaultFacet.VaultInventoryEmpty.selector);
         vm.prank(alice);
         vault.buyInventoryRewardNFT(first, alice);
+    }
+
+    function test_InventoryPurchaseSafelyDeliversToCompliantContract() public {
+        uint256 first = _buyNew(alice);
+        _buyNew(alice);
+        _buyNew(bob);
+        _approveAndRedeem(alice, first, alice);
+        VaultNftReceiver nftReceiver = new VaultNftReceiver();
+
+        vm.prank(bob);
+        vault.buyInventoryRewardNFT(first, address(nftReceiver));
+
+        assertEq(rewardNft.ownerOf(first), address(nftReceiver));
+        assertEq(vault.vaultInventory(), 0);
+        assertEq(vault.vaultAccounting().vaultTokenBacking, PRICE * 3);
+    }
+
+    function test_RevertWhen_InventoryReceiverCannotAcceptNft() public {
+        uint256 first = _buyNew(alice);
+        _buyNew(alice);
+        _buyNew(bob);
+        _approveAndRedeem(alice, first, alice);
+        VaultNonReceiver nonReceiver = new VaultNonReceiver();
+        uint256 backingBefore = vault.vaultAccounting().vaultTokenBacking;
+        uint256 buyerBalanceBefore = token.balanceOf(bob);
+
+        vm.expectRevert();
+        vm.prank(bob);
+        vault.buyInventoryRewardNFT(first, address(nonReceiver));
+
+        assertEq(rewardNft.ownerOf(first), address(diamond));
+        assertEq(vault.vaultAccounting().vaultTokenBacking, backingBefore);
+        assertEq(token.balanceOf(bob), buyerBalanceBefore);
     }
 
     function test_RedemptionAndInventorySalePreserveAttachedClaims() public {

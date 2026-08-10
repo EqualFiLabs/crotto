@@ -74,7 +74,7 @@ contract NFTVaultFacet is CrottoFacet, INFTVault {
         LibAssetTransfer.pullExact(governance.immutableConfiguration.activationToken, msg.sender, price);
         LibVaultStorage.layout().tokenBacking += price;
 
-        _transferRewardNft(rewardNft, address(this), receiver, tokenId);
+        _safeTransferRewardNft(rewardNft, address(this), receiver, tokenId);
         _enforceVaultSolvency(governance, rewardNft);
         emit VaultNFTPurchased(msg.sender, receiver, tokenId, price);
     }
@@ -161,6 +161,12 @@ contract NFTVaultFacet is CrottoFacet, INFTVault {
     function _transferRewardNft(IRewardNFT rewardNft, address from, address to, uint256 tokenId) private {
         _beginRewardNFTTransfer(from, to, tokenId);
         rewardNft.transferFrom(from, to, tokenId);
+        _finishRewardNFTTransfer();
+    }
+
+    function _safeTransferRewardNft(IRewardNFT rewardNft, address from, address to, uint256 tokenId) private {
+        _beginRewardNFTTransfer(from, to, tokenId);
+        rewardNft.safeTransferFrom(from, to, tokenId);
         _finishRewardNFTTransfer();
     }
 
