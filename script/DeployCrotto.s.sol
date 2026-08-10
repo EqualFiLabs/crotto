@@ -33,6 +33,15 @@ struct CrottoDeploymentKernel {
     IDiamondCut.FacetCut shellCut;
 }
 
+struct CrottoDeploymentPlan {
+    address timelock;
+    address diamond;
+    address activationToken;
+    address rewardNFT;
+    address canonicalHook;
+    bytes32 hookSalt;
+}
+
 /// @notice Deterministic Ethereum deployment flow for the complete Crotto protocol.
 contract DeployCrotto is CrottoScriptBase {
     uint160 private constant REQUIRED_HOOK_FLAGS = uint160(
@@ -61,6 +70,7 @@ contract DeployCrotto is CrottoScriptBase {
     error DeployerRequired();
     error UnexpectedPredictedAddress(address expected, address actual);
     error HookDeploymentFailed(address expectedHook);
+    error TreasuryReceiverIsProtocol(address receiver);
     error UnexpectedDeploymentState(bytes32 field);
 
     event CrottoDeploymentCompleted(
@@ -82,11 +92,13 @@ contract DeployCrotto is CrottoScriptBase {
         CrottoDeploymentConfiguration memory configuration = reader.loadConfiguration(configPath);
         EthereumTarget memory target = reader.ethereumTarget(block.chainid);
 
-        reader.validateTarget(target, configuration.enforceRuntimeCodeHashes);
+        reader.validateTarget(target);
         reader.validateEconomics(configuration);
+        CrottoDeploymentPlan memory plan = _planDeployment(deployer, target, configuration);
+        _validatePreBroadcast(target, configuration, plan);
 
         vm.startBroadcast(deployer);
-        result = _deploy(deployer, target, configuration);
+        result = _deploy(deployer, target, configuration, plan);
         vm.stopBroadcast();
 
         _verifyDeployment(deployer, target, configuration, result);
@@ -102,14 +114,19 @@ contract DeployCrotto is CrottoScriptBase {
         );
     }
 
-    function _deploy(address deployer, EthereumTarget memory target, CrottoDeploymentConfiguration memory configuration)
-        private
-        returns (CrottoDeploymentResult memory result)
-    {
+    function _deploy(
+        address deployer,
+        EthereumTarget memory target,
+        CrottoDeploymentConfiguration memory configuration,
+        CrottoDeploymentPlan memory plan
+    ) private returns (CrottoDeploymentResult memory result) {
         CrottoDeploymentKernel memory kernel;
         (result, kernel) = _deployKernel(deployer, configuration);
+        _requirePredicted(plan.timelock, result.timelock);
+        _requirePredicted(plan.diamond, result.diamond);
+        _requirePredicted(plan.rewardNFT, result.rewardNFT);
         (result.activationToken, result.canonicalHook) =
-            _deployTokenAndHook(deployer, target, configuration, result.diamond);
+            _deployTokenAndHook(target, configuration, result.diamond, plan);
 
         IDiamondCut.FacetCut[] memory applicationCuts = _deployApplicationFacets();
         GovernanceInitialization memory initialization = _initialization(target, configuration, result);
@@ -152,36 +169,85 @@ contract DeployCrotto is CrottoScriptBase {
     }
 
     function _deployTokenAndHook(
-        address deployer,
         EthereumTarget memory target,
         CrottoDeploymentConfiguration memory configuration,
-        address diamond
+        address diamond,
+        CrottoDeploymentPlan memory plan
     ) private returns (address activationToken, address canonicalHook) {
-        address predictedToken = vm.computeCreateAddress(deployer, vm.getNonce(deployer));
-        bytes memory hookArguments = abi.encode(
+        bytes memory hookArguments = _hookArguments(target, configuration, diamond, plan.activationToken);
+        bytes memory hookCreationCode = vm.getCode("CrottoSwapFeeHook.sol:CrottoSwapFeeHook");
+
+        activationToken = _deployArtifact(
+            "ActivationToken.sol:ActivationToken",
+            abi.encode(configuration.treasuryReceiver, diamond, plan.canonicalHook)
+        );
+        _requirePredicted(plan.activationToken, activationToken);
+
+        bytes memory hookInitCode = abi.encodePacked(hookCreationCode, hookArguments);
+        (bool hookCreated,) = target.create2Deployer.call(abi.encodePacked(plan.hookSalt, hookInitCode));
+        if (!hookCreated || plan.canonicalHook.code.length == 0) revert HookDeploymentFailed(plan.canonicalHook);
+        canonicalHook = plan.canonicalHook;
+    }
+
+    function _planDeployment(
+        address deployer,
+        EthereumTarget memory target,
+        CrottoDeploymentConfiguration memory configuration
+    ) private view returns (CrottoDeploymentPlan memory plan) {
+        uint256 nonce = vm.getNonce(deployer);
+        plan.timelock = vm.computeCreateAddress(deployer, nonce);
+        plan.diamond = vm.computeCreateAddress(deployer, nonce + 3);
+        plan.rewardNFT = vm.computeCreateAddress(deployer, nonce + 4);
+        plan.activationToken = vm.computeCreateAddress(deployer, nonce + 5);
+
+        bytes memory hookCreationCode = vm.getCode("CrottoSwapFeeHook.sol:CrottoSwapFeeHook");
+        bytes memory hookArguments = _hookArguments(target, configuration, plan.diamond, plan.activationToken);
+        (plan.canonicalHook, plan.hookSalt) =
+            HookMiner.find(target.create2Deployer, REQUIRED_HOOK_FLAGS, hookCreationCode, hookArguments);
+    }
+
+    function _validatePreBroadcast(
+        EthereumTarget memory target,
+        CrottoDeploymentConfiguration memory configuration,
+        CrottoDeploymentPlan memory plan
+    ) private pure {
+        CrottoDeploymentResult memory planned = CrottoDeploymentResult({
+            timelock: plan.timelock,
+            diamond: plan.diamond,
+            activationToken: plan.activationToken,
+            rewardNFT: plan.rewardNFT,
+            canonicalHook: plan.canonicalHook,
+            selectorManifestHash: bytes32(0)
+        });
+        _initialization(target, configuration, planned);
+
+        address receiver = configuration.treasuryReceiver;
+        if (
+            receiver == target.weth || receiver == target.poolManager || receiver == target.vrfWrapper
+                || receiver == target.create2Deployer || receiver == plan.timelock || receiver == plan.diamond
+                || receiver == plan.activationToken || receiver == plan.rewardNFT || receiver == plan.canonicalHook
+        ) revert TreasuryReceiverIsProtocol(receiver);
+    }
+
+    function _hookArguments(
+        EthereumTarget memory target,
+        CrottoDeploymentConfiguration memory configuration,
+        address diamond,
+        address activationToken
+    ) private pure returns (bytes memory) {
+        return abi.encode(
             target.poolManager,
             diamond,
-            predictedToken,
+            activationToken,
             target.weth,
             configuration.canonicalTickSpacing,
             configuration.initialTokenPerWethWad,
             configuration.maxCombinedHookFeeBps
         );
-        bytes memory hookCreationCode = vm.getCode("CrottoSwapFeeHook.sol:CrottoSwapFeeHook");
-        (address predictedHook, bytes32 hookSalt) =
-            HookMiner.find(target.create2Deployer, REQUIRED_HOOK_FLAGS, hookCreationCode, hookArguments);
+    }
 
-        activationToken = _deployArtifact(
-            "ActivationToken.sol:ActivationToken", abi.encode(configuration.treasuryReceiver, diamond, predictedHook)
-        );
-        if (activationToken != predictedToken) {
-            revert UnexpectedPredictedAddress(predictedToken, activationToken);
-        }
-
-        bytes memory hookInitCode = abi.encodePacked(hookCreationCode, hookArguments);
-        (bool hookCreated,) = target.create2Deployer.call(abi.encodePacked(hookSalt, hookInitCode));
-        if (!hookCreated || predictedHook.code.length == 0) revert HookDeploymentFailed(predictedHook);
-        canonicalHook = predictedHook;
+    function _requirePredicted(address expected, address actual) private pure {
+        if (actual != expected) revert UnexpectedPredictedAddress(expected, actual);
     }
 
     function _deployApplicationFacets() private returns (IDiamondCut.FacetCut[] memory cuts) {

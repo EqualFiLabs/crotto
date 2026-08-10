@@ -69,6 +69,16 @@ contract EthereumDeploymentToolingTest is Test {
         assertEq(mainnet.create2Deployer, sepolia.create2Deployer);
     }
 
+    function test_RejectsDisablingRuntimeCodeHashEnforcement() public {
+        CrottoDeploymentConfiguration memory configuration = configurationReader.loadConfiguration(
+            string.concat(vm.projectRoot(), "/script/config/sepolia-rehearsal.json")
+        );
+        configuration.enforceRuntimeCodeHashes = false;
+
+        vm.expectRevert(CrottoDeploymentConfig.RuntimeCodeHashEnforcementRequired.selector);
+        configurationReader.validateEconomics(configuration);
+    }
+
     function test_CompleteDeploymentFacetManifestHasNoSelectorCollisions() public view {
         bytes4[] memory seen = new bytes4[](128);
         uint256 seenCount;

@@ -48,6 +48,7 @@ contract CrottoDeploymentConfig is Script {
     error UnsupportedEthereumChain(uint256 chainId);
     error MissingConfigurationAddress(bytes32 field);
     error MissingProposer();
+    error RuntimeCodeHashEnforcementRequired();
     error InvalidRuntimeCode(address target, bytes32 expected, bytes32 actual);
     error NarrowValueOverflow(bytes32 field, uint256 value);
 
@@ -137,16 +138,17 @@ contract CrottoDeploymentConfig is Script {
             BuybackConfiguration({slippageBps: _uint16(json, ".buyback.slippageBps", "slippageBps")});
     }
 
-    function validateTarget(EthereumTarget memory target, bool enforceRuntimeCodeHashes) public view {
-        _validateCode(target.weth, target.wethRuntimeCodeHash, enforceRuntimeCodeHashes);
-        _validateCode(target.poolManager, target.poolManagerRuntimeCodeHash, enforceRuntimeCodeHashes);
-        _validateCode(target.vrfWrapper, target.vrfWrapperRuntimeCodeHash, enforceRuntimeCodeHashes);
-        _validateCode(target.create2Deployer, target.create2DeployerRuntimeCodeHash, enforceRuntimeCodeHashes);
+    function validateTarget(EthereumTarget memory target) public view {
+        _validateCode(target.weth, target.wethRuntimeCodeHash);
+        _validateCode(target.poolManager, target.poolManagerRuntimeCodeHash);
+        _validateCode(target.vrfWrapper, target.vrfWrapperRuntimeCodeHash);
+        _validateCode(target.create2Deployer, target.create2DeployerRuntimeCodeHash);
     }
 
     function validateEconomics(CrottoDeploymentConfiguration memory configuration) public pure {
         if (configuration.treasuryReceiver == address(0)) revert MissingConfigurationAddress("treasuryReceiver");
         if (configuration.guardian == address(0)) revert MissingConfigurationAddress("guardian");
+        if (!configuration.enforceRuntimeCodeHashes) revert RuntimeCodeHashEnforcementRequired();
         if (configuration.proposers.length == 0) revert MissingProposer();
         for (uint256 i; i < configuration.proposers.length; ++i) {
             if (configuration.proposers[i] == address(0)) revert MissingProposer();
@@ -159,9 +161,9 @@ contract CrottoDeploymentConfig is Script {
         LibCrottoValidation.validateBuybackConfiguration(configuration.buyback);
     }
 
-    function _validateCode(address target, bytes32 expectedHash, bool enforceHash) private view {
+    function _validateCode(address target, bytes32 expectedHash) private view {
         bytes32 actualHash = target.codehash;
-        if (target.code.length == 0 || (enforceHash && actualHash != expectedHash)) {
+        if (target.code.length == 0 || actualHash != expectedHash) {
             revert InvalidRuntimeCode(target, expectedHash, actualHash);
         }
     }
