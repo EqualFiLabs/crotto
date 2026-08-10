@@ -312,6 +312,24 @@ contract DiamondGovernanceTest is Test {
         );
     }
 
+    function test_RevertWhen_ImmutableWethHasNoCode() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+        initialization.immutableConfiguration.weth = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.WethHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
     function test_RevertWhen_ActivationTokenHasNoCode() public {
         (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
 
@@ -799,7 +817,7 @@ contract DiamondGovernanceTest is Test {
             immutableConfiguration: ImmutableConfiguration({
                 activationToken: address(activationToken),
                 rewardNFT: address(rewardNft),
-                weth: address(0x1003),
+                weth: address(hook),
                 vrfWrapper: address(0x1004),
                 uniswapV4PoolManager: address(0x1005),
                 canonicalHook: address(hook),
