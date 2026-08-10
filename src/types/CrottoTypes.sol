@@ -41,6 +41,8 @@ struct ImmutableConfiguration {
     uint256 initialTokenPerWethWad;
     uint16 maxCombinedHookFeeBps;
     int24 canonicalTickSpacing;
+    uint32 vrfCallbackGasLimit;
+    uint16 vrfRequestConfirmations;
 }
 
 /// @notice Governed values snapshotted when a round is initialized.

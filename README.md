@@ -15,8 +15,8 @@ development.
 - `ActivationToken`, `RewardNFT`, and `CrottoSwapFeeHook` are narrow satellite contracts controlled by the Diamond.
 - User-facing economic flows use WETH. Ticket purchases accept native ETH only to wrap it immediately; caller
   reimbursements and tips remain native ETH because Chainlink VRF is paid natively.
-- NFTVault redemption backing, lottery liabilities, RewardNFT rewards, treasury balances, and POL are isolated
-  accounting classes.
+- NFTVault redemption backing, lottery liabilities, RewardNFT rewards, Operations Reserve, and POL are isolated
+  accounting classes. Treasury allocations transfer directly to the current external Treasury Receiver.
 - The canonical Uniswap v4 pool is protocol-owned only. Third parties remain free to create unrelated external pools.
 
 ## Toolchain

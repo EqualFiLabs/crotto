@@ -59,6 +59,7 @@ contract LotteryTicketFacet is CrottoFacet {
         uint256 treasuryAmount = ticketValue - winnerAmount - nftAmount - buybackAmount;
 
         currentRound.winnerPoolWeth += winnerAmount;
+        lottery.totalWinnerPoolWethLiability += winnerAmount;
         LibTreasuryStorage.layout().operationsReserveEth += operationsContribution;
         LibBuybackStorage.Layout storage buyback = LibBuybackStorage.layout();
         buyback.wethReserve += buybackAmount;

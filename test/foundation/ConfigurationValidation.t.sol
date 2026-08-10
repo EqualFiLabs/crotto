@@ -91,6 +91,8 @@ contract ConfigurationValidationTest is Test {
     bytes32 private constant TREASURY_RECEIVER_FIELD = "treasuryReceiver";
     bytes32 private constant UNISWAP_V4_POOL_MANAGER_FIELD = "uniswapV4PoolManager";
     bytes32 private constant VAULT_PRICE_FIELD = "vaultPrice";
+    bytes32 private constant VRF_CALLBACK_GAS_LIMIT_FIELD = "vrfCallbackGasLimit";
+    bytes32 private constant VRF_REQUEST_CONFIRMATIONS_FIELD = "vrfRequestConfirmations";
 
     ValidationHarness internal harness;
     RoundConfigurationPackingHarness private packingHarness;
@@ -182,6 +184,18 @@ contract ConfigurationValidationTest is Test {
         configuration.vaultPrice = 0;
 
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroValue.selector, VAULT_PRICE_FIELD));
+        harness.validateImmutableConfiguration(configuration);
+    }
+
+    function test_RevertWhen_VrfRequestParameterIsZero() public {
+        ImmutableConfiguration memory configuration = _validImmutableConfiguration();
+        configuration.vrfCallbackGasLimit = 0;
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroValue.selector, VRF_CALLBACK_GAS_LIMIT_FIELD));
+        harness.validateImmutableConfiguration(configuration);
+
+        configuration = _validImmutableConfiguration();
+        configuration.vrfRequestConfirmations = 0;
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.ZeroValue.selector, VRF_REQUEST_CONFIRMATIONS_FIELD));
         harness.validateImmutableConfiguration(configuration);
     }
 
@@ -396,7 +410,9 @@ contract ConfigurationValidationTest is Test {
             requiredBootstrapWeth: 30 ether,
             initialTokenPerWethWad: 10_000 ether,
             maxCombinedHookFeeBps: 200,
-            canonicalTickSpacing: 60
+            canonicalTickSpacing: 60,
+            vrfCallbackGasLimit: 250_000,
+            vrfRequestConfirmations: 3
         });
     }
 

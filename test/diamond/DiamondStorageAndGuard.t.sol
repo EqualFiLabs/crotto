@@ -105,6 +105,28 @@ contract StorageHarnessFacet {
         slots[7] = LibCrottoGuard.storageSlot();
         slots[8] = LibBuybackStorage.storageSlot();
     }
+
+    function seedLegacyTreasuryWords(uint256 legacyWeth, uint256 legacyToken, uint256 operationsReserve) external {
+        bytes32 slot = LibTreasuryStorage.storageSlot();
+        assembly ("memory-safe") {
+            sstore(slot, legacyWeth)
+            sstore(add(slot, 1), legacyToken)
+        }
+        LibTreasuryStorage.layout().operationsReserveEth = operationsReserve;
+    }
+
+    function treasuryStorageWords()
+        external
+        view
+        returns (uint256 legacyWeth, uint256 legacyToken, uint256 operationsReserve)
+    {
+        bytes32 slot = LibTreasuryStorage.storageSlot();
+        assembly ("memory-safe") {
+            legacyWeth := sload(slot)
+            legacyToken := sload(add(slot, 1))
+        }
+        operationsReserve = LibTreasuryStorage.layout().operationsReserveEth;
+    }
 }
 
 contract GuardHarnessFacet is CrottoFacet, IGuardHarness {
@@ -217,6 +239,16 @@ contract DiamondStorageAndGuardTest is Test {
         assertEq(IERC173(address(diamond)).owner(), owner);
     }
 
+    function test_LegacyTreasuryWordsRemainReservedAheadOfOperationsAccounting() public {
+        StorageHarnessFacet harness = StorageHarnessFacet(address(diamond));
+        harness.seedLegacyTreasuryWords(11, 22, 33);
+
+        (uint256 legacyWeth, uint256 legacyToken, uint256 operationsReserve) = harness.treasuryStorageWords();
+        assertEq(legacyWeth, 11);
+        assertEq(legacyToken, 22);
+        assertEq(operationsReserve, 33);
+    }
+
     function test_CrossFacetReentrancyRevertsAndGuardRecovers() public {
         vm.expectRevert(LibCrottoGuard.ReentrantCall.selector);
         IGuardHarness(address(diamond)).reenterGuardedIncrement();
@@ -326,11 +358,13 @@ contract DiamondStorageAndGuardTest is Test {
     }
 
     function _storageHarnessSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](4);
+        selectors = new bytes4[](6);
         selectors[0] = StorageHarnessFacet.configureRewardNFT.selector;
         selectors[1] = StorageHarnessFacet.writeSentinels.selector;
         selectors[2] = StorageHarnessFacet.sentinels.selector;
         selectors[3] = StorageHarnessFacet.storageSlots.selector;
+        selectors[4] = StorageHarnessFacet.seedLegacyTreasuryWords.selector;
+        selectors[5] = StorageHarnessFacet.treasuryStorageWords.selector;
     }
 
     function _guardHarnessSelectors() private pure returns (bytes4[] memory selectors) {

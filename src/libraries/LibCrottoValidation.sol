@@ -40,6 +40,8 @@ library LibCrottoValidation {
         _positive(config.requiredBootstrapWeth, "requiredBootstrapWeth");
         _positive(config.initialTokenPerWethWad, "initialTokenPerWethWad");
         _positive(config.maxCombinedHookFeeBps, "maxCombinedHookFeeBps");
+        _positive(config.vrfCallbackGasLimit, "vrfCallbackGasLimit");
+        _positive(config.vrfRequestConfirmations, "vrfRequestConfirmations");
 
         if (config.vaultPrice > type(uint256).max / config.rewardNFTMaxSupply) {
             revert VaultBackingCapacityExceeded(config.vaultPrice, config.rewardNFTMaxSupply);

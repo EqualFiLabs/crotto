@@ -49,6 +49,8 @@ interface ICrotto {
 
     function retryRandomness(uint256 roundId) external returns (uint256 requestId);
 
+    function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external;
+
     function finalizeLottery(uint256 roundId) external;
 
     function claimWinnings(uint256 roundId, address receiver) external returns (uint256 amount);

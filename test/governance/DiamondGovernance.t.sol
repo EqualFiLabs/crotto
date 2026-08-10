@@ -333,6 +333,24 @@ contract DiamondGovernanceTest is Test {
         );
     }
 
+    function test_RevertWhen_ImmutableVrfWrapperHasNoCode() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+        initialization.immutableConfiguration.vrfWrapper = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.VrfWrapperHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
     function test_RevertWhen_ActivationTokenHasNoCode() public {
         (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
 
@@ -821,7 +839,7 @@ contract DiamondGovernanceTest is Test {
                 activationToken: address(activationToken),
                 rewardNFT: address(rewardNft),
                 weth: address(weth),
-                vrfWrapper: address(0x1004),
+                vrfWrapper: address(hook),
                 uniswapV4PoolManager: address(0x1005),
                 canonicalHook: address(hook),
                 rewardNFTMaxSupply: 10_000,
@@ -829,7 +847,9 @@ contract DiamondGovernanceTest is Test {
                 requiredBootstrapWeth: 30 ether,
                 initialTokenPerWethWad: 10_000 ether,
                 maxCombinedHookFeeBps: 200,
-                canonicalTickSpacing: 60
+                canonicalTickSpacing: 60,
+                vrfCallbackGasLimit: 250_000,
+                vrfRequestConfirmations: 3
             }),
             roundConfiguration: _validRoundConfiguration(),
             activationConfiguration: _validActivationConfiguration(),

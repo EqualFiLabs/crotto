@@ -15,6 +15,8 @@ library LibLotteryStorage {
         mapping(uint256 roundId => mapping(address player => uint256 count)) playerTicketCounts;
         mapping(uint256 roundId => mapping(address player => bool claimed)) playerRewardClaimed;
         mapping(uint256 requestId => RequestRecord) requests;
+        uint256 totalWinnerPoolWethLiability;
+        uint256 totalPlayerTokenLiability;
     }
 
     function layout() internal pure returns (Layout storage state) {

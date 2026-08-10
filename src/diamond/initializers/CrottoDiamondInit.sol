@@ -27,6 +27,7 @@ contract CrottoDiamondInit {
     error RewardNFTMaxSupplyMismatch(address rewardNft, uint256 configuredMaxSupply, uint256 actualMaxSupply);
     error ActivationTokenHasNoCode(address token);
     error WethHasNoCode(address weth);
+    error VrfWrapperHasNoCode(address wrapper);
     error ActivationTokenDiamondMismatch(address token, address configuredDiamond, address expectedDiamond);
     error ActivationTokenHookMismatch(address token, address configuredHook, address expectedHook);
 
@@ -56,6 +57,8 @@ contract CrottoDiamondInit {
 
         address weth = initialization.immutableConfiguration.weth;
         if (weth.code.length == 0) revert WethHasNoCode(weth);
+        address vrfWrapper = initialization.immutableConfiguration.vrfWrapper;
+        if (vrfWrapper.code.length == 0) revert VrfWrapperHasNoCode(vrfWrapper);
 
         _validateRewardNft(initialization);
 

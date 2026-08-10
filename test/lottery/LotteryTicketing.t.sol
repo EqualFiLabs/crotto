@@ -22,6 +22,7 @@ import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
 import {LibBuybackStorage} from "../../src/libraries/storage/LibBuybackStorage.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
+import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
 import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
@@ -93,6 +94,10 @@ contract LotteryTicketStateFacet {
         return (state.wethReserve, state.totalTicketsSold);
     }
 
+    function winnerLiability() external view returns (uint256) {
+        return LibLotteryStorage.layout().totalWinnerPoolWethLiability;
+    }
+
     function wethRewardBook() external view returns (RewardBook memory) {
         return LibRewardsStorage.layout().wethBook;
     }
@@ -133,6 +138,7 @@ contract LotteryTicketingTest is Test {
     LotteryTicketFacet private ticketing;
     LotteryViewFacet private views;
     LotteryTicketStateFacet private stateView;
+    ICrottoGovernance private governance;
 
     function setUp() public {
         vm.chainId(31_337);
@@ -173,6 +179,7 @@ contract LotteryTicketingTest is Test {
         ticketing = LotteryTicketFacet(address(diamond));
         views = LotteryViewFacet(address(diamond));
         stateView = LotteryTicketStateFacet(address(diamond));
+        governance = ICrottoGovernance(address(diamond));
         vm.deal(player, 100 ether);
     }
 
@@ -186,6 +193,7 @@ contract LotteryTicketingTest is Test {
         Round memory storedRound = views.round(1);
         assertEq(storedRound.ticketCount, 2);
         assertEq(storedRound.winnerPoolWeth, 101);
+        assertEq(stateView.winnerLiability(), 101);
         assertEq(views.remainingTickets(1), 8);
         assertEq(views.playerTickets(1, player), 2);
         assertEq(views.ticketBatchCount(1), 1);
@@ -232,6 +240,18 @@ contract LotteryTicketingTest is Test {
         assertEq(buybackReserve, 10);
         assertEq(weth.balanceOf(treasury), 41);
         assertEq(weth.balanceOf(address(diamond)), 60);
+    }
+
+    function test_TreasuryReceiverChangeAppliesOnlyToFuturePurchases() public {
+        address nextTreasury = makeAddr("nextTreasury");
+        _buy(player, 1);
+        uint256 deliveredBeforeChange = weth.balanceOf(treasury);
+
+        governance.setTreasuryReceiver(nextTreasury);
+        _buy(player, 1);
+
+        assertEq(weth.balanceOf(treasury), deliveredBeforeChange);
+        assertEq(weth.balanceOf(nextTreasury), deliveredBeforeChange);
     }
 
     function test_ExactSelloutClosesRoundAndRejectsFurtherPurchases() public {
@@ -422,7 +442,9 @@ contract LotteryTicketingTest is Test {
                 requiredBootstrapWeth: 300,
                 initialTokenPerWethWad: 10_000 ether,
                 maxCombinedHookFeeBps: 200,
-                canonicalTickSpacing: 60
+                canonicalTickSpacing: 60,
+                vrfCallbackGasLimit: 250_000,
+                vrfRequestConfirmations: 3
             }),
             roundConfiguration: RoundConfiguration({
                 ticketPrice: TICKET_PRICE,
@@ -513,7 +535,7 @@ contract LotteryTicketingTest is Test {
     }
 
     function _stateSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](8);
+        selectors = new bytes4[](9);
         selectors[0] = LotteryTicketStateFacet.operationsReserve.selector;
         selectors[1] = LotteryTicketStateFacet.bootstrapWeth.selector;
         selectors[2] = LotteryTicketStateFacet.buybackState.selector;
@@ -522,5 +544,6 @@ contract LotteryTicketingTest is Test {
         selectors[5] = LotteryTicketStateFacet.setTotalActiveWeight.selector;
         selectors[6] = LotteryTicketStateFacet.setPolInitialized.selector;
         selectors[7] = LotteryTicketStateFacet.setWeth.selector;
+        selectors[8] = LotteryTicketStateFacet.winnerLiability.selector;
     }
 }
