@@ -158,7 +158,7 @@ contract POLInitializationTest is Test {
 
         assertTrue(initialization.canInitializePOL());
         vm.expectEmit(true, true, false, true, address(diamond));
-        emit POLInitialized(caller, expectedKey.toId(), REQUIRED_WETH, expectedToken, 123);
+        emit POLInitialized(caller, expectedKey.toId(), REQUIRED_WETH + EXCESS_WETH, expectedToken, 123);
         vm.prank(caller);
         (PoolId poolId, uint128 liquidity) = initialization.initializePOL();
 
