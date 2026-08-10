@@ -55,6 +55,7 @@ struct RoundConfiguration {
     uint256 finalizationCallerReward;
     uint16 winnerShareBps;
     uint16 nftShareBps;
+    uint16 buybackShareBps;
     uint16 treasuryShareBps;
 }
 

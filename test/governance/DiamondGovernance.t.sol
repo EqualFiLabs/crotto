@@ -28,6 +28,7 @@ import {
     GovernanceInitialization,
     HookConfiguration,
     ImmutableConfiguration,
+    Round,
     RoundConfiguration
 } from "../../src/types/CrottoTypes.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
@@ -128,6 +129,14 @@ contract GovernanceStateProbeFacet {
 
     function hookConfiguration() external view returns (HookConfiguration memory) {
         return LibGovernanceStorage.layout().hookConfiguration;
+    }
+
+    function currentRoundId() external view returns (uint256) {
+        return LibLotteryStorage.layout().currentRoundId;
+    }
+
+    function storedRound(uint256 roundId) external view returns (Round memory) {
+        return LibLotteryStorage.layout().rounds[roundId];
     }
 
     function seedHistoricalRound(uint256 roundId, RoundConfiguration calldata configuration) external {
@@ -269,6 +278,11 @@ contract DiamondGovernanceTest is Test {
         assertEq(activationToken.crottoDiamond(), address(diamond));
         assertEq(activationToken.canonicalHook(), address(hook));
         assertEq(stateProbe.roundConfiguration().ticketTarget, 100);
+        assertEq(stateProbe.currentRoundId(), 1);
+        Round memory firstRound = stateProbe.storedRound(1);
+        assertEq(uint8(firstRound.status), 0);
+        assertEq(firstRound.config.ticketTarget, 100);
+        assertEq(firstRound.ticketCount, 0);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 1);
         assertEq(activation.costs[0], 100 ether);
@@ -492,6 +506,7 @@ contract DiamondGovernanceTest is Test {
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setGuardian, (nextGuardian)));
 
         assertEq(stateProbe.roundConfiguration().ticketTarget, 200);
+        assertEq(stateProbe.storedRound(1).config.ticketTarget, 100);
         assertEq(stateProbe.historicalRoundConfiguration(7).ticketTarget, 100);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 2);
@@ -563,7 +578,7 @@ contract DiamondGovernanceTest is Test {
         invalidRound.ticketOperationsFee = 0.07 ether;
         vm.prank(address(timelock));
         vm.expectRevert(
-            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 4 ether, 40 ether)
+            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 3 ether, 30 ether)
         );
         governance.setRoundConfiguration(invalidRound);
 
@@ -766,7 +781,7 @@ contract DiamondGovernanceTest is Test {
                 canonicalHook: address(hook),
                 rewardNFTMaxSupply: 10_000,
                 vaultPrice: 1_000 ether,
-                requiredBootstrapWeth: 40 ether,
+                requiredBootstrapWeth: 30 ether,
                 initialTokenPerWethWad: 10_000 ether,
                 maxCombinedHookFeeBps: 200,
                 canonicalTickSpacing: 60
@@ -807,7 +822,8 @@ contract DiamondGovernanceTest is Test {
             requestCallerReward: 0.1 ether,
             finalizationCallerReward: 0.1 ether,
             winnerShareBps: 5_000,
-            nftShareBps: 4_000,
+            nftShareBps: 3_000,
+            buybackShareBps: 1_000,
             treasuryShareBps: 1_000
         });
     }
@@ -869,7 +885,7 @@ contract DiamondGovernanceTest is Test {
     }
 
     function _stateProbeSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](9);
+        selectors = new bytes4[](11);
         selectors[0] = GovernanceStateProbeFacet.initialized.selector;
         selectors[1] = GovernanceStateProbeFacet.immutableConfiguration.selector;
         selectors[2] = GovernanceStateProbeFacet.roundConfiguration.selector;
@@ -879,6 +895,8 @@ contract DiamondGovernanceTest is Test {
         selectors[6] = GovernanceStateProbeFacet.historicalRoundConfiguration.selector;
         selectors[7] = GovernanceStateProbeFacet.seedStoredWeight.selector;
         selectors[8] = GovernanceStateProbeFacet.storedWeight.selector;
+        selectors[9] = GovernanceStateProbeFacet.currentRoundId.selector;
+        selectors[10] = GovernanceStateProbeFacet.storedRound.selector;
     }
 
     function _pauseProbeSelectors() private pure returns (bytes4[] memory selectors) {

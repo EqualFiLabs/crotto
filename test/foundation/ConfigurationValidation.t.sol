@@ -55,6 +55,16 @@ contract ValidationHarness {
         );
     }
 
+    function validateFourWayAllocation(uint256 first, uint256 second, uint256 third, uint256 fourth) external pure {
+        if (first > type(uint16).max) revert HarnessValueOutOfBounds(first);
+        if (second > type(uint16).max) revert HarnessValueOutOfBounds(second);
+        if (third > type(uint16).max) revert HarnessValueOutOfBounds(third);
+        if (fourth > type(uint16).max) revert HarnessValueOutOfBounds(fourth);
+        LibCrottoValidation.validateAllocation(
+            SafeCast.toUint16(first), SafeCast.toUint16(second), SafeCast.toUint16(third), SafeCast.toUint16(fourth)
+        );
+    }
+
     function validatePauseFlags(uint256 flags) external pure {
         LibCrottoValidation.validatePauseFlags(flags);
     }
@@ -79,7 +89,8 @@ contract ConfigurationValidationTest is Test {
         assertEq(CrottoConstants.GENESIS_TREASURY_SUPPLY, 10_000_000 ether);
 
         assertEq(CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS, 5_000);
-        assertEq(CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS, 4_000);
+        assertEq(CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS, 3_000);
+        assertEq(CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS, 1_000);
         assertEq(CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS, 1_000);
 
         assertEq(CrottoConstants.INITIAL_ACTIVATION_BURN_SHARE_BPS, 2_500);
@@ -101,7 +112,7 @@ contract ConfigurationValidationTest is Test {
     function test_ApprovedConfigurationsValidate() public view {
         harness.validateImmutableConfiguration(_validImmutableConfiguration());
         harness.validateRoundConfiguration(_validRoundConfiguration());
-        harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
+        harness.validateBootstrapReachability(_validRoundConfiguration(), 30 ether);
         harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
         harness.validateTreasuryReceiver(address(0x1007), _validImmutableConfiguration());
@@ -201,9 +212,9 @@ contract ConfigurationValidationTest is Test {
         RoundConfiguration memory configuration = _validRoundConfiguration();
 
         vm.expectRevert(
-            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 40 ether, 41 ether)
+            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 30 ether, 31 ether)
         );
-        harness.validateBootstrapReachability(configuration, 41 ether);
+        harness.validateBootstrapReachability(configuration, 31 ether);
     }
 
     function test_RevertWhen_ActivationCostsAreNotIncreasing() public {
@@ -267,6 +278,18 @@ contract ConfigurationValidationTest is Test {
         harness.validateAllocation(first, second, third);
     }
 
+    function testFuzz_ConservedFourWayAllocationAlwaysValidates(uint256 first, uint256 second, uint256 third)
+        public
+        view
+    {
+        first = bound(first, 0, CrottoConstants.BPS);
+        second = bound(second, 0, CrottoConstants.BPS - first);
+        third = bound(third, 0, CrottoConstants.BPS - first - second);
+        uint256 fourth = CrottoConstants.BPS - first - second - third;
+
+        harness.validateFourWayAllocation(first, second, third, fourth);
+    }
+
     function _validImmutableConfiguration() private pure returns (ImmutableConfiguration memory configuration) {
         configuration = ImmutableConfiguration({
             activationToken: address(0x1001),
@@ -277,7 +300,7 @@ contract ConfigurationValidationTest is Test {
             canonicalHook: address(0x1006),
             rewardNFTMaxSupply: 10_000,
             vaultPrice: 1_000 ether,
-            requiredBootstrapWeth: 40 ether,
+            requiredBootstrapWeth: 30 ether,
             initialTokenPerWethWad: 10_000 ether,
             maxCombinedHookFeeBps: 200,
             canonicalTickSpacing: 60
@@ -296,6 +319,7 @@ contract ConfigurationValidationTest is Test {
             finalizationCallerReward: 0.01 ether,
             winnerShareBps: CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS,
             nftShareBps: CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS,
+            buybackShareBps: CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS,
             treasuryShareBps: CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS
         });
     }

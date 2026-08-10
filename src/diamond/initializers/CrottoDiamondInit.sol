@@ -13,6 +13,7 @@ import {IActivationToken} from "../../interfaces/IActivationToken.sol";
 import {IRewardNFT} from "../../interfaces/IRewardNFT.sol";
 import {ICrottoSwapFeeHook} from "../../interfaces/ICrottoSwapFeeHook.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
+import {LibLottery} from "../../libraries/LibLottery.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {GovernanceInitialization} from "../../types/CrottoTypes.sol";
 import {LibDiamond} from "../libraries/LibDiamond.sol";
@@ -67,6 +68,8 @@ contract CrottoDiamondInit {
         state.guardian = initialization.guardian;
         state.activationConfigurationVersion = 1;
         state.immutableConfigurationInitialized = true;
+
+        LibLottery.initializeFirstRound(initialization.roundConfiguration);
 
         ICrottoSwapFeeHook(hook).setHookConfiguration(initialization.hookConfiguration);
 

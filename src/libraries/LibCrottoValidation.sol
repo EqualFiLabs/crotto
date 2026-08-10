@@ -57,7 +57,7 @@ library LibCrottoValidation {
         _positive(config.vrfRetryDelay, "vrfRetryDelay");
         _positive(config.requestCallerReward, "requestCallerReward");
         _positive(config.finalizationCallerReward, "finalizationCallerReward");
-        validateAllocation(config.winnerShareBps, config.nftShareBps, config.treasuryShareBps);
+        validateAllocation(config.winnerShareBps, config.nftShareBps, config.buybackShareBps, config.treasuryShareBps);
 
         uint256 available = config.ticketOperationsFee * config.ticketTarget;
         uint256 required = config.maxVrfCost + config.requestCallerReward + config.finalizationCallerReward;
@@ -122,6 +122,16 @@ library LibCrottoValidation {
 
     function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {
         uint256 totalBps = uint256(firstShareBps) + secondShareBps + thirdShareBps;
+        if (totalBps != CrottoConstants.BPS) revert InvalidAllocation(totalBps);
+    }
+
+    function validateAllocation(
+        uint16 firstShareBps,
+        uint16 secondShareBps,
+        uint16 thirdShareBps,
+        uint16 fourthShareBps
+    ) internal pure {
+        uint256 totalBps = uint256(firstShareBps) + secondShareBps + thirdShareBps + fourthShareBps;
         if (totalBps != CrottoConstants.BPS) revert InvalidAllocation(totalBps);
     }
 
