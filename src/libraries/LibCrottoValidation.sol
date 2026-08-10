@@ -24,6 +24,7 @@ library LibCrottoValidation {
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
     error PlayerRewardLiabilityCapacityExceeded(uint256 rewardRate, uint256 ticketTarget);
+    error TicketPaymentCapacityExceeded(uint256 ticketPrice, uint256 operationsFee, uint256 ticketTarget);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
 
@@ -63,6 +64,13 @@ library LibCrottoValidation {
 
         if (config.playerRewardRate > type(uint256).max / config.ticketTarget) {
             revert PlayerRewardLiabilityCapacityExceeded(config.playerRewardRate, config.ticketTarget);
+        }
+        if (config.ticketPrice > type(uint256).max - config.ticketOperationsFee) {
+            revert TicketPaymentCapacityExceeded(config.ticketPrice, config.ticketOperationsFee, config.ticketTarget);
+        }
+        uint256 paymentPerTicket = config.ticketPrice + config.ticketOperationsFee;
+        if (paymentPerTicket > type(uint256).max / config.ticketTarget) {
+            revert TicketPaymentCapacityExceeded(config.ticketPrice, config.ticketOperationsFee, config.ticketTarget);
         }
 
         uint256 available = config.ticketOperationsFee * config.ticketTarget;

@@ -225,6 +225,38 @@ contract ConfigurationValidationTest is Test {
         harness.validateRoundConfiguration(configuration);
     }
 
+    function test_MaximumTicketPaymentQuoteValidates() public view {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.ticketOperationsFee = 2;
+        configuration.ticketPrice = type(uint256).max / 2 - 2;
+        configuration.maxVrfCost = 1;
+        configuration.requestCallerReward = 1;
+        configuration.finalizationCallerReward = 1;
+
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_RevertWhen_TicketPaymentQuoteExceedsCapacity() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.ticketOperationsFee = 2;
+        configuration.ticketPrice = type(uint256).max / 2 - 1;
+        configuration.maxVrfCost = 1;
+        configuration.requestCallerReward = 1;
+        configuration.finalizationCallerReward = 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.TicketPaymentCapacityExceeded.selector,
+                configuration.ticketPrice,
+                configuration.ticketOperationsFee,
+                configuration.ticketTarget
+            )
+        );
+        harness.validateRoundConfiguration(configuration);
+    }
+
     function test_RevertWhen_PlayerRewardLiabilityExceedsCapacity() public {
         RoundConfiguration memory configuration = _validRoundConfiguration();
         configuration.ticketTarget = 2;

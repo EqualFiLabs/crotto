@@ -588,6 +588,24 @@ contract DiamondGovernanceTest is Test {
         );
         governance.setRoundConfiguration(invalidRound);
 
+        invalidRound = stateProbe.roundConfiguration();
+        invalidRound.ticketTarget = 1;
+        invalidRound.ticketPrice = type(uint256).max - 2;
+        invalidRound.ticketOperationsFee = 3;
+        invalidRound.maxVrfCost = 1;
+        invalidRound.requestCallerReward = 1;
+        invalidRound.finalizationCallerReward = 1;
+        vm.prank(address(timelock));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.TicketPaymentCapacityExceeded.selector,
+                invalidRound.ticketPrice,
+                invalidRound.ticketOperationsFee,
+                invalidRound.ticketTarget
+            )
+        );
+        governance.setRoundConfiguration(invalidRound);
+
         ActivationConfiguration memory invalidActivation = _validActivationConfiguration();
         invalidActivation.costs[1] = invalidActivation.costs[0];
         vm.prank(address(timelock));
