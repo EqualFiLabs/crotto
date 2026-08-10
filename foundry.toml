@@ -12,6 +12,9 @@ bytecode_hash = "none"
 via_ir = true
 fs_permissions = [{ access = "read", path = "./out" }]
 
+[profile.stateful]
+code_size_limit = 200_000
+
 [fmt]
 line_length = 120
 tab_width = 4

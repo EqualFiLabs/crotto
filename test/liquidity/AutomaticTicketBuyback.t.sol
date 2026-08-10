@@ -25,10 +25,8 @@ import {POLInitializationFacet} from "../../src/diamond/facets/POLInitialization
 import {RewardAccountingFacet} from "../../src/diamond/facets/RewardAccountingFacet.sol";
 import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondInit.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
-import {IAutomaticTicketBuyback} from "../../src/interfaces/IAutomaticTicketBuyback.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
-import {ICrottoSwapFeeHook} from "../../src/interfaces/ICrottoSwapFeeHook.sol";
 import {IPOLInitialization} from "../../src/interfaces/IPOLInitialization.sol";
 import {LibAutomaticBuyback} from "../../src/libraries/LibAutomaticBuyback.sol";
 import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
@@ -45,12 +43,41 @@ import {
     RoundConfiguration,
     RoundStatus
 } from "../../src/types/CrottoTypes.sol";
+import {IPoolDonateRouter, IPoolSwapRouter} from "./CrottoSwapFeeHook.t.sol";
 
 interface IV4BuybackTestDeployment {
     function manager() external view returns (IPoolManager);
+
+    function donateRouter() external view returns (address);
+
+    function swapRouter() external view returns (address);
 }
 
-contract BuybackVrfWrapperProbe {}
+contract BuybackVrfWrapperProbe {
+    uint256 public price = 0.01 ether;
+    uint256 public nextRequestId = 1;
+    address public latestConsumer;
+
+    function calculateRequestPriceNative(uint32, uint32) external view returns (uint256) {
+        return price;
+    }
+
+    function requestRandomWordsInNative(uint32, uint16, uint32, bytes calldata)
+        external
+        payable
+        returns (uint256 requestId)
+    {
+        require(msg.value == price, "wrong price");
+        latestConsumer = msg.sender;
+        requestId = nextRequestId++;
+    }
+
+    function fulfill(uint256 requestId, uint256 randomWord) external {
+        uint256[] memory words = new uint256[](1);
+        words[0] = randomWord;
+        ICrotto(latestConsumer).rawFulfillRandomWords(requestId, words);
+    }
+}
 
 abstract contract AutomaticTicketBuybackFixture is Test {
     using PoolIdLibrary for PoolKey;
@@ -66,7 +93,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
     uint256 internal constant TOKEN_PER_WETH_WAD = 10_000 ether;
     int24 internal constant TICK_SPACING = 60;
 
-    bytes32 private constant SWAP_EVENT_SIGNATURE =
+    bytes32 internal constant SWAP_EVENT_SIGNATURE =
         keccak256("Swap(bytes32,address,int128,int128,uint160,uint128,int24,uint24)");
     bytes32 private constant BUYBACK_EVENT_SIGNATURE = keccak256(
         "AutomaticTicketBuybackExecuted(uint256,address,address,uint256,uint256,uint256,uint256,uint16,uint256,uint256)"
@@ -80,9 +107,13 @@ abstract contract AutomaticTicketBuybackFixture is Test {
 
     CrottoDiamond internal diamond;
     ActivationToken internal token;
+    RewardNFT internal rewardNft;
+    BuybackVrfWrapperProbe internal vrfWrapper;
     IERC20 internal weth;
     CrottoSwapFeeHook internal hook;
     IPoolManager internal manager;
+    IPoolDonateRouter internal donateRouter;
+    IPoolSwapRouter internal swapRouter;
     ICrotto internal lottery;
     ICrottoGovernance internal governance;
     IPOLInitialization internal pol;
@@ -94,6 +125,8 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         IV4BuybackTestDeployment v4 =
             IV4BuybackTestDeployment(_deployArtifact("out/V4TestDeployment.sol/V4TestDeployment.json"));
         manager = v4.manager();
+        donateRouter = IPoolDonateRouter(v4.donateRouter());
+        swapRouter = IPoolSwapRouter(v4.swapRouter());
 
         WETH9 wethImplementation = new WETH9();
         address wethAddress = wethIsCurrency0 ? address(uint160(0x1000)) : address(uint160(type(uint160).max - 0x1000));
@@ -105,7 +138,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         shellCut[0] = _facetCut(address(cutFacet), _artifactSelectors("out/DiamondCutFacet.sol/DiamondCutFacet.json"));
         diamond = new CrottoDiamond(address(this), shellCut, address(0), "");
 
-        RewardNFT rewardNft = new RewardNFT(address(diamond), 10_000);
+        rewardNft = new RewardNFT(address(diamond), _rewardNftMaxSupply());
         address expectedToken = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         bytes memory hookConstructorArgs = abi.encode(
             manager, address(diamond), expectedToken, wethAddress, TICK_SPACING, TOKEN_PER_WETH_WAD, uint16(100)
@@ -152,8 +185,9 @@ abstract contract AutomaticTicketBuybackFixture is Test {
             address(settlementFacet), _artifactSelectors("out/BuybackSettlementFacet.sol/BuybackSettlementFacet.json")
         );
 
+        vrfWrapper = new BuybackVrfWrapperProbe();
         GovernanceInitialization memory initialization =
-            _initialization(address(rewardNft), wethAddress, address(new BuybackVrfWrapperProbe()));
+            _initialization(address(rewardNft), wethAddress, address(vrfWrapper));
         IDiamondCut(address(diamond))
             .diamondCut(
                 cuts, address(initializer), abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
@@ -215,7 +249,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         assertTrue(sawWeth && sawToken, "both fee assets");
     }
 
-    function _buybackEvent(Vm.Log[] memory logs)
+    function _buybackEvent(Vm.Log[] memory logs, address expectedTreasury, uint16 expectedSlippageBps)
         internal
         returns (uint256 grossBudget, uint256 exactWethDebit, uint256 minimumOut, uint256 actualOut)
     {
@@ -226,31 +260,31 @@ abstract contract AutomaticTicketBuybackFixture is Test {
             ) {
                 assertEq(uint256(logs[i].topics[1]), 1);
                 assertEq(address(uint160(uint256(logs[i].topics[2]))), player);
-                assertEq(address(uint160(uint256(logs[i].topics[3]))), treasury);
+                assertEq(address(uint160(uint256(logs[i].topics[3]))), expectedTreasury);
                 uint16 slippageBps;
                 (grossBudget,,, exactWethDebit, slippageBps, minimumOut, actualOut) =
                     abi.decode(logs[i].data, (uint256, uint256, uint256, uint256, uint16, uint256, uint256));
-                assertEq(slippageBps, 500);
+                assertEq(slippageBps, expectedSlippageBps);
                 return (grossBudget, exactWethDebit, minimumOut, actualOut);
             }
         }
         fail("buyback event missing");
     }
 
-    function _initialization(address rewardNft, address wethAddress, address vrfWrapper)
-        private
+    function _initialization(address rewardNftAddress, address wethAddress, address vrfWrapperAddress)
+        internal
         view
         returns (GovernanceInitialization memory initialization)
     {
         initialization = GovernanceInitialization({
             immutableConfiguration: ImmutableConfiguration({
                 activationToken: address(token),
-                rewardNFT: rewardNft,
+                rewardNFT: rewardNftAddress,
                 weth: wethAddress,
-                vrfWrapper: vrfWrapper,
+                vrfWrapper: vrfWrapperAddress,
                 uniswapV4PoolManager: address(manager),
                 canonicalHook: address(hook),
-                rewardNFTMaxSupply: 10_000,
+                rewardNFTMaxSupply: _rewardNftMaxSupply(),
                 vaultPrice: 1 ether,
                 requiredBootstrapWeth: REQUIRED_BOOTSTRAP_WETH,
                 initialTokenPerWethWad: TOKEN_PER_WETH_WAD,
@@ -290,7 +324,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
     }
 
     function _facetCut(address facet, bytes4[] memory selectors)
-        private
+        internal
         pure
         returns (IDiamondCut.FacetCut memory cut)
     {
@@ -299,7 +333,11 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         });
     }
 
-    function _artifactSelectors(string memory artifactPath) private view returns (bytes4[] memory selectors) {
+    function _rewardNftMaxSupply() internal pure virtual returns (uint256) {
+        return 10_000;
+    }
+
+    function _artifactSelectors(string memory artifactPath) internal view returns (bytes4[] memory selectors) {
         // Paths are fixed by this test and access is read-only to generated Foundry output.
         // forge-lint: disable-next-line(unsafe-cheatcode)
         string[] memory signatures = vm.parseJsonKeys(vm.readFile(artifactPath), ".methodIdentifiers");
@@ -309,7 +347,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         }
     }
 
-    function _deployArtifact(string memory artifact) private returns (address deployed) {
+    function _deployArtifact(string memory artifact) internal returns (address deployed) {
         bytes memory creationCode = vm.getCode(artifact);
         assembly ("memory-safe") {
             deployed := create(0, add(creationCode, 0x20), mload(creationCode))
@@ -336,7 +374,8 @@ contract AutomaticTicketBuybackTest is AutomaticTicketBuybackFixture {
 
         _assertOneCanonicalSwap(logs);
         _assertBilateralHookFees(logs);
-        (uint256 grossBudget, uint256 exactWethDebit, uint256 minimumOut, uint256 actualOut) = _buybackEvent(logs);
+        (uint256 grossBudget, uint256 exactWethDebit, uint256 minimumOut, uint256 actualOut) =
+            _buybackEvent(logs, treasury, 500);
         assertEq(grossBudget, 0.2 ether);
         assertEq(exactWethDebit, grossBudget);
         assertGe(actualOut, minimumOut);
@@ -394,6 +433,64 @@ contract AutomaticTicketBuybackTest is AutomaticTicketBuybackFixture {
         vm.prank(address(manager));
         IUnlockCallback(address(diamond)).unlockCallback("");
     }
+
+    function test_LiveTreasuryAndSlippageApplyToTheNextPurchase() public {
+        address nextTreasury = makeAddr("nextTreasury");
+        uint256 originalTreasuryTokenBefore = token.balanceOf(treasury);
+        governance.setTreasuryReceiver(nextTreasury);
+        governance.setBuybackConfiguration(BuybackConfiguration({slippageBps: 900}));
+
+        vm.recordLogs();
+        _buyTickets(1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        (uint256 grossBudget, uint256 exactWethDebit, uint256 minimumOut, uint256 actualOut) =
+            _buybackEvent(logs, nextTreasury, 900);
+        assertEq(grossBudget, 0.1 ether);
+        assertEq(exactWethDebit, grossBudget);
+        assertGe(actualOut, minimumOut);
+        assertGt(token.balanceOf(nextTreasury), actualOut, "net output plus hook treasury fee");
+        assertEq(token.balanceOf(treasury), originalTreasuryTokenBefore, "old receiver is prospective only");
+    }
+
+    function test_TicketPauseBlocksEmbeddedBuybackWithoutBlockingPOLMaintenance() public {
+        governance.pauseActions(1);
+        uint256 ticketCountBefore = views.round(1).ticketCount;
+        vm.expectRevert();
+        _buyTickets(1);
+        assertEq(views.round(1).ticketCount, ticketCountBefore);
+
+        vm.startPrank(treasury);
+        token.approve(address(hook), 1_000 ether);
+        vm.stopPrank();
+        vm.prank(treasury);
+        hook.donatePOL(1_000 ether, 0);
+        hook.compoundPOL();
+        assertTrue(hook.poolInitialized());
+    }
+}
+
+contract AutomaticTicketBuybackPrePolTest is AutomaticTicketBuybackFixture {
+    function test_PrePolBuybackShareRoutesDirectlyToBootstrapWithoutSwapping() public {
+        _deployProtocol(true);
+        uint256 treasuryTokenBefore = token.balanceOf(treasury);
+
+        vm.recordLogs();
+        _buyTickets(1);
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+
+        uint256 managerSwaps;
+        for (uint256 i; i < logs.length; ++i) {
+            if (
+                logs[i].emitter == address(manager) && logs[i].topics.length != 0
+                    && logs[i].topics[0] == SWAP_EVENT_SIGNATURE
+            ) ++managerSwaps;
+        }
+        assertEq(managerSwaps, 0);
+        assertEq(pol.bootstrapPolWeth(), 0.4 ether, "NFT and Buyback shares bootstrap POL");
+        assertEq(token.balanceOf(treasury), treasuryTokenBefore);
+        assertEq(views.round(1).ticketCount, 1);
+    }
 }
 
 contract AutomaticTicketBuybackReverseOrderTest is AutomaticTicketBuybackFixture {
@@ -408,7 +505,7 @@ contract AutomaticTicketBuybackReverseOrderTest is AutomaticTicketBuybackFixture
 
         _assertOneCanonicalSwap(logs);
         _assertBilateralHookFees(logs);
-        (uint256 grossBudget,, uint256 minimumOut, uint256 actualOut) = _buybackEvent(logs);
+        (uint256 grossBudget,, uint256 minimumOut, uint256 actualOut) = _buybackEvent(logs, treasury, 500);
         assertEq(grossBudget, 0.1 ether);
         assertGe(actualOut, minimumOut);
         assertGt(token.balanceOf(treasury), treasuryTokenBefore);

@@ -4,6 +4,8 @@ pragma solidity 0.8.33;
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {WETH9} from "@chainlink/contracts/src/v0.8/vendor/canonical-weth/WETH9.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
 import {CustomRevert} from "@uniswap/v4-core/src/libraries/CustomRevert.sol";
@@ -201,6 +203,115 @@ interface IPoolModifyLiquidityRouter {
         returns (BalanceDelta delta);
 }
 
+contract HookAdversarialToken is ERC20 {
+    address public canonicalHook;
+    address public taxedSender;
+    address public shortReceiver;
+    bool public bootstrapMintExecuted;
+    bool public preserveAllowance;
+
+    constructor() ERC20("Adversarial Crotto", "aCROTTO") {}
+
+    function setCanonicalHook(address hook_) external {
+        require(canonicalHook == address(0), "hook already set");
+        canonicalHook = hook_;
+    }
+
+    function setTaxedSender(address sender) external {
+        taxedSender = sender;
+    }
+
+    function setShortReceiver(address receiver) external {
+        shortReceiver = receiver;
+    }
+
+    function setPreserveAllowance(bool preserve) external {
+        preserveAllowance = preserve;
+    }
+
+    function mint(address receiver, uint256 amount) external {
+        _mint(receiver, amount);
+    }
+
+    function mintBootstrapPOL(address receiver, uint256 amount) external {
+        require(msg.sender == canonicalHook, "not hook");
+        require(!bootstrapMintExecuted, "bootstrap minted");
+        bootstrapMintExecuted = true;
+        _mint(receiver, amount);
+    }
+
+    function _update(address from, address to, uint256 value) internal override {
+        if (from != address(0) && from == taxedSender && value != 0) {
+            super._update(from, address(0), 1);
+        }
+        if (to != address(0) && to == shortReceiver && value != 0) {
+            super._update(from, to, value - 1);
+            super._update(from, address(0), 1);
+            return;
+        }
+        super._update(from, to, value);
+    }
+
+    function _spendAllowance(address owner, address spender, uint256 value) internal override {
+        if (!preserveAllowance) super._spendAllowance(owner, spender, value);
+    }
+}
+
+contract AdversarialHookController {
+    using SafeERC20 for IERC20;
+
+    address public hook;
+    address public immutable weth;
+    bool public initializationAuthorized;
+    bool public activeRewards;
+    bool public leaveRewardAllowance;
+    address public treasury = address(0xBEEF);
+
+    constructor(address weth_) {
+        weth = weth_;
+    }
+
+    function setHook(address hook_) external {
+        require(hook == address(0), "hook already set");
+        hook = hook_;
+    }
+
+    function setHookConfiguration(HookConfiguration calldata configuration) external {
+        ICrottoSwapFeeHook(hook).setHookConfiguration(configuration);
+    }
+
+    function setRewardMode(bool active, bool leaveAllowance) external {
+        activeRewards = active;
+        leaveRewardAllowance = leaveAllowance;
+    }
+
+    function totalActiveWeight() external view returns (uint256) {
+        return activeRewards ? 1 : 0;
+    }
+
+    function polInitializationAuthorized() external view returns (bool) {
+        return initializationAuthorized;
+    }
+
+    function treasuryReceiver() external view returns (address) {
+        return treasury;
+    }
+
+    function routeHookRevenue(address asset, uint256 rewardAmount, uint256) external {
+        require(msg.sender == hook, "not hook");
+        if (rewardAmount != 0 && !leaveRewardAllowance) {
+            IERC20(asset).safeTransferFrom(msg.sender, address(this), rewardAmount);
+        }
+    }
+
+    function initialize(PoolKey calldata key, uint160 sqrtPriceX96, uint256 tokenAmount, uint256 wethAmount) external {
+        initializationAuthorized = true;
+        IERC20(weth).safeTransfer(hook, wethAmount);
+        ICrottoSwapFeeHook(hook).initializeCanonicalPool(key, sqrtPriceX96, tokenAmount, wethAmount);
+        initializationAuthorized = false;
+    }
+}
+
 contract CrottoSwapFeeHookTest is Test {
     using PoolIdLibrary for PoolKey;
     using StateLibrary for IPoolManager;
@@ -368,6 +479,26 @@ contract CrottoSwapFeeHookTest is Test {
         hook.donatePOL(0, 0);
     }
 
+    function test_DonationsPullExactAssetsWithoutCreatingAllowanceOrClaims() public {
+        _initialize(REQUIRED_WETH);
+        _mintWeth(2 ether);
+        uint256 tokenBefore = token.balanceOf(address(this));
+        uint256 wethBefore = wethToken.balanceOf(address(this));
+        uint256 controllerTokenBefore = token.balanceOf(address(controller));
+        uint256 controllerWethBefore = wethToken.balanceOf(address(controller));
+
+        hook.donatePOL(2_000 ether, 2 ether);
+
+        assertEq(tokenBefore - token.balanceOf(address(this)), 2_000 ether);
+        assertEq(wethBefore - wethToken.balanceOf(address(this)), 2 ether);
+        assertEq(token.balanceOf(address(controller)), controllerTokenBefore);
+        assertEq(wethToken.balanceOf(address(controller)), controllerWethBefore);
+        assertEq(token.allowance(address(hook), address(controller)), 0);
+        assertEq(wethToken.allowance(address(hook), address(controller)), 0);
+        _assertPendingSolvent(Currency.wrap(address(token)));
+        _assertPendingSolvent(Currency.wrap(address(wethToken)));
+    }
+
     function test_TokenHeavyDonationKeepsUnmatchedValueForLaterCompounding() public {
         _initialize(REQUIRED_WETH);
         uint128 liquidityBefore = hook.lockedLiquidity();
@@ -464,6 +595,14 @@ contract CrottoSwapFeeHookTest is Test {
         controller.setHookConfiguration(configuration);
     }
 
+    function test_LiveAsymmetricRatesConserveBothFeeLegsAtTheCeiling() public {
+        HookConfiguration memory configuration = HookConfiguration({
+            inputFeeBps: 37, outputFeeBps: 63, polShareBps: 3_333, nftShareBps: 1, treasuryShareBps: 6_666
+        });
+        controller.setHookConfiguration(configuration);
+        _assertBilateralSwap(true, true, true);
+    }
+
     function test_ExactInputTokenToWethChargesBothLegsAndRedirectsInactiveNftShare() public {
         _assertBilateralSwap(true, true, false);
     }
@@ -525,7 +664,7 @@ contract CrottoSwapFeeHookTest is Test {
         private
         view
     {
-        HookConfiguration memory configuration = _configuration();
+        HookConfiguration memory configuration = hook.hookConfiguration();
         bytes32 feeEvent = keccak256("SwapLegFeeAccrued(bytes32,address,bool,uint256,uint256,uint256,uint256)");
         uint256 found;
         bool sawToken;
@@ -587,6 +726,145 @@ contract CrottoSwapFeeHookTest is Test {
             polShareBps: CrottoConstants.INITIAL_HOOK_POL_SHARE_BPS,
             nftShareBps: CrottoConstants.INITIAL_HOOK_NFT_SHARE_BPS,
             treasuryShareBps: CrottoConstants.INITIAL_HOOK_TREASURY_SHARE_BPS
+        });
+    }
+
+    function _deployArtifact(string memory artifact) private returns (address deployed) {
+        bytes memory creationCode = vm.getCode(artifact);
+        assembly ("memory-safe") {
+            deployed := create(0, add(creationCode, 0x20), mload(creationCode))
+        }
+        require(deployed != address(0), "artifact deployment failed");
+    }
+}
+
+contract CrottoSwapFeeHookAdversarialTest is Test {
+    using PoolIdLibrary for PoolKey;
+
+    uint160 private constant REQUIRED_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
+        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
+        | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
+    uint256 private constant REQUIRED_WETH = 30 ether;
+    uint256 private constant TOKEN_PER_WETH_WAD = 10_000 ether;
+    int24 private constant TICK_SPACING = 60;
+
+    HookAdversarialToken private token;
+    WETH9 private weth;
+    AdversarialHookController private controller;
+    CrottoSwapFeeHook private hook;
+    IPoolManager private manager;
+    IPoolSwapRouter private swapRouter;
+    PoolKey private canonicalKey;
+
+    function setUp() public {
+        IV4TestDeployment v4 = IV4TestDeployment(_deployArtifact("out/V4TestDeployment.sol/V4TestDeployment.json"));
+        manager = v4.manager();
+        swapRouter = IPoolSwapRouter(v4.swapRouter());
+        weth = new WETH9();
+        token = new HookAdversarialToken();
+        controller = new AdversarialHookController(address(weth));
+
+        bytes memory constructorArgs = abi.encode(
+            manager, address(controller), address(token), address(weth), TICK_SPACING, TOKEN_PER_WETH_WAD, uint16(100)
+        );
+        (address expectedHook, bytes32 salt) =
+            HookMiner.find(address(this), REQUIRED_FLAGS, type(CrottoSwapFeeHook).creationCode, constructorArgs);
+        hook = new CrottoSwapFeeHook{salt: salt}(
+            manager, address(controller), address(token), address(weth), TICK_SPACING, TOKEN_PER_WETH_WAD, 100
+        );
+        assertEq(address(hook), expectedHook);
+        token.setCanonicalHook(address(hook));
+        controller.setHook(address(hook));
+        controller.setHookConfiguration(_configuration());
+
+        canonicalKey = LibCanonicalPool.key(address(token), address(weth), address(hook), TICK_SPACING);
+        token.mint(address(this), 1_000_000 ether);
+        token.approve(address(swapRouter), type(uint256).max);
+        token.approve(address(hook), type(uint256).max);
+        weth.approve(address(swapRouter), type(uint256).max);
+        weth.approve(address(hook), type(uint256).max);
+        _mintWeth(REQUIRED_WETH + 10 ether);
+        assertTrue(weth.transfer(address(controller), REQUIRED_WETH));
+        controller.initialize(
+            canonicalKey,
+            LibCanonicalPool.sqrtPriceX96(address(token), address(weth), TOKEN_PER_WETH_WAD),
+            REQUIRED_WETH * 10_000,
+            REQUIRED_WETH
+        );
+    }
+
+    function test_IncompatibleReceiverCreditRevertsTheSwap() public {
+        token.setShortReceiver(address(hook));
+        _assertSwapRevertsWith(CrottoSwapFeeHook.IncompatiblePoolCurrency.selector);
+    }
+
+    function test_SenderExtraPoolManagerDebitRevertsTheSwap() public {
+        token.setTaxedSender(address(manager));
+        _assertSwapRevertsWith(CrottoSwapFeeHook.UnexpectedTokenDebit.selector);
+    }
+
+    function test_SenderExtraHookDebitRevertsTheSwap() public {
+        token.setTaxedSender(address(hook));
+        _assertSwapRevertsWith(CrottoSwapFeeHook.UnexpectedTokenDebit.selector);
+    }
+
+    function test_ResidualRewardAllowanceRevertsTheSwap() public {
+        controller.setRewardMode(true, false);
+        token.setPreserveAllowance(true);
+        _assertSwapRevertsWith(CrottoSwapFeeHook.UnexpectedTokenAllowance.selector);
+        assertEq(token.allowance(address(hook), address(controller)), 0, "rollback clears approval");
+    }
+
+    function test_UnexpectedSettlementRevertsDonationCompounding() public {
+        _mintWeth(1 ether);
+        vm.mockCall(address(manager), abi.encodeWithSelector(IPoolManager.settle.selector), abi.encode(uint256(0)));
+        vm.expectPartialRevert(CrottoSwapFeeHook.UnexpectedSettlement.selector);
+        hook.donatePOL(1_000 ether, 1 ether);
+        vm.clearMockedCalls();
+    }
+
+    function executeTokenToWeth() external {
+        require(msg.sender == address(this), "self only");
+        bool tokenIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(token);
+        swapRouter.swap(
+            canonicalKey,
+            SwapParams({
+                zeroForOne: tokenIsCurrency0,
+                amountSpecified: -int256(1_000 ether),
+                sqrtPriceLimitX96: tokenIsCurrency0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            IPoolSwapRouter.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+    }
+
+    function _assertSwapRevertsWith(bytes4 expectedInnerSelector) private {
+        (bool success, bytes memory revertData) = address(this).call(abi.encodeCall(this.executeTokenToWeth, ()));
+        assertFalse(success, "swap must revert");
+        assertEq(bytes4(revertData), CustomRevert.WrappedError.selector, "PoolManager wrapper");
+
+        bytes memory encodedArguments = new bytes(revertData.length - 4);
+        for (uint256 i; i < encodedArguments.length; ++i) {
+            encodedArguments[i] = revertData[i + 4];
+        }
+        (address target, bytes4 callbackSelector, bytes memory innerReason,) =
+            abi.decode(encodedArguments, (address, bytes4, bytes, bytes));
+        assertEq(target, address(hook));
+        assertTrue(
+            callbackSelector == IHooks.beforeSwap.selector || callbackSelector == IHooks.afterSwap.selector,
+            "swap callback"
+        );
+        assertEq(bytes4(innerReason), expectedInnerSelector, "inner hook error");
+    }
+
+    function _mintWeth(uint256 amount) private {
+        vm.deal(address(this), address(this).balance + amount);
+        weth.deposit{value: amount}();
+    }
+
+    function _configuration() private pure returns (HookConfiguration memory configuration) {
+        configuration = HookConfiguration({
+            inputFeeBps: 50, outputFeeBps: 50, polShareBps: 5_000, nftShareBps: 4_000, treasuryShareBps: 1_000
         });
     }
 
