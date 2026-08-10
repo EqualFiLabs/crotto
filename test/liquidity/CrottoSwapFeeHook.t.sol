@@ -14,6 +14,7 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {ICrottoSwapFeeHook} from "../../src/interfaces/ICrottoSwapFeeHook.sol";
@@ -63,6 +64,20 @@ interface IV4TestDeployment {
     function donateRouter() external view returns (address);
 
     function modifyLiquidityRouter() external view returns (address);
+
+    function swapRouter() external view returns (address);
+}
+
+interface IPoolSwapRouter {
+    struct TestSettings {
+        bool takeClaims;
+        bool settleUsingBurn;
+    }
+
+    function swap(PoolKey memory key, SwapParams memory params, TestSettings memory settings, bytes memory hookData)
+        external
+        payable
+        returns (BalanceDelta delta);
 }
 
 interface IPoolDonateRouter {
@@ -99,12 +114,14 @@ contract CrottoSwapFeeHookTest is Test {
     IPoolManager private manager;
     IPoolDonateRouter private donateRouter;
     IPoolModifyLiquidityRouter private modifyLiquidityRouter;
+    IPoolSwapRouter private swapRouter;
 
     function setUp() public {
         IV4TestDeployment v4 = IV4TestDeployment(_deployArtifact("out/V4TestDeployment.sol/V4TestDeployment.json"));
         manager = v4.manager();
         donateRouter = IPoolDonateRouter(v4.donateRouter());
         modifyLiquidityRouter = IPoolModifyLiquidityRouter(v4.modifyLiquidityRouter());
+        swapRouter = IPoolSwapRouter(v4.swapRouter());
         wethToken = new WETH9();
         controller = new CrottoHookController(address(wethToken));
 
@@ -135,8 +152,10 @@ contract CrottoSwapFeeHookTest is Test {
 
         token.approve(address(hook), type(uint256).max);
         token.approve(address(donateRouter), type(uint256).max);
+        token.approve(address(swapRouter), type(uint256).max);
         wethToken.approve(address(hook), type(uint256).max);
         wethToken.approve(address(donateRouter), type(uint256).max);
+        wethToken.approve(address(swapRouter), type(uint256).max);
     }
 
     function test_MinedAddressAndImmutableBindingsMatchCanonicalPermissions() public view {
@@ -279,6 +298,28 @@ contract CrottoSwapFeeHookTest is Test {
         configuration.treasuryShareBps = 999;
         vm.expectRevert(CrottoSwapFeeHook.InvalidHookConfiguration.selector);
         controller.setHookConfiguration(configuration);
+    }
+
+    function test_CanonicalPoolSwapsRemainLiveBeforeBilateralFeesAreEnabled() public {
+        _initialize(REQUIRED_WETH);
+        _mintWeth(1 ether);
+        bool wethIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(wethToken);
+        uint256 tokenBefore = token.balanceOf(address(this));
+        uint256 wethBefore = wethToken.balanceOf(address(this));
+
+        swapRouter.swap(
+            canonicalKey,
+            SwapParams({
+                zeroForOne: wethIsCurrency0,
+                amountSpecified: -int256(0.1 ether),
+                sqrtPriceLimitX96: wethIsCurrency0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+            }),
+            IPoolSwapRouter.TestSettings({takeClaims: false, settleUsingBurn: false}),
+            ""
+        );
+
+        assertLt(wethToken.balanceOf(address(this)), wethBefore);
+        assertGt(token.balanceOf(address(this)), tokenBefore);
     }
 
     function test_DonationAndCompoundingRequireInitializedPool() public {

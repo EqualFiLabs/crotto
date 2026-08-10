@@ -283,7 +283,7 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        revert HookNotImplemented();
+        return (IHooks.beforeSwap.selector, BeforeSwapDelta.wrap(0), 0);
     }
 
     function _afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
@@ -292,7 +292,7 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         override
         returns (bytes4, int128)
     {
-        revert HookNotImplemented();
+        return (IHooks.afterSwap.selector, 0);
     }
 
     function _compoundThroughUnlock() private returns (uint128 liquidityAdded) {
