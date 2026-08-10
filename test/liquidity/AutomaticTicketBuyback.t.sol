@@ -363,7 +363,7 @@ contract AutomaticTicketBuybackTest is AutomaticTicketBuybackFixture {
         uint128 lockedBefore = hook.lockedLiquidity();
         POLAccountingView memory accountingBefore = pol.polAccounting();
 
-        vm.expectRevert();
+        vm.expectPartialRevert(LibAutomaticBuyback.UnexpectedWethDebt.selector);
         _buyTickets(25);
 
         assertEq(views.round(1).ticketCount, ticketCountBefore);
