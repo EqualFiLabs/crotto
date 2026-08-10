@@ -35,7 +35,7 @@ contract OperationsFacet is CrottoFacet {
             state.totalCallerCreditsEth -= amount;
 
             uint256 balanceBefore = address(this).balance;
-            (bool success,) = payable(receiver).call{value: amount}("");
+            bool success = _sendNative(receiver, amount);
             if (!success) revert NativeTransferFailed(receiver, amount);
             uint256 balanceAfter = address(this).balance;
             uint256 actualDebit = balanceBefore >= balanceAfter ? balanceBefore - balanceAfter : 0;
@@ -56,5 +56,12 @@ contract OperationsFacet is CrottoFacet {
 
     function totalCallerCredits() external view returns (uint256) {
         return LibTreasuryStorage.layout().totalCallerCreditsEth;
+    }
+
+    /// @dev Ignores return data so a recipient cannot force an unbounded copy into Diamond memory.
+    function _sendNative(address receiver, uint256 amount) private returns (bool success) {
+        assembly ("memory-safe") {
+            success := call(gas(), receiver, amount, 0, 0, 0, 0)
+        }
     }
 }

@@ -35,6 +35,14 @@ contract RefundingNativeReceiver {
     }
 }
 
+contract LargeReturnDataNativeReceiver {
+    receive() external payable {
+        assembly ("memory-safe") {
+            return(0, 0x100000)
+        }
+    }
+}
+
 contract OperationsLifecycleHarness is CrottoFacet {
     error HarnessActionOutOfBounds(uint256 action);
     error HarnessAttemptOutOfBounds(uint256 attempt);
@@ -179,6 +187,21 @@ contract OperationsReserveTest is Test {
         assertEq(operations.totalCallerCredits(), 0);
         assertEq(operations.operationsReserve(), 7 ether);
         assertEq(address(diamond).balance, 7 ether);
+    }
+
+    function test_ClaimIgnoresReceiverReturnData() public {
+        _fund(5 ether);
+        lifecycle.processFinalization(finalizer, 1, 3 ether);
+        LargeReturnDataNativeReceiver largeReturnData = new LargeReturnDataNativeReceiver();
+
+        vm.prank(finalizer);
+        uint256 claimed = operations.claimCallerRewards{gas: 3_000_000}(address(largeReturnData));
+
+        assertEq(claimed, 3 ether);
+        assertEq(address(largeReturnData).balance, 3 ether);
+        assertEq(operations.callerCredit(finalizer), 0);
+        assertEq(operations.totalCallerCredits(), 0);
+        assertEq(operations.operationsReserve(), 2 ether);
     }
 
     function test_ReserveCarriesAcrossRoundsAndCreditsRemainIndependent() public {
