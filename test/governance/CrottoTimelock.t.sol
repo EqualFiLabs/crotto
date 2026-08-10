@@ -39,6 +39,10 @@ contract CrottoTimelockTest is Test {
         address[] memory empty = new address[](0);
         CrottoTimelock testnetTimelock = new CrottoTimelock(empty, empty, address(0));
         assertEq(testnetTimelock.getMinDelay(), timelock.DEVELOPMENT_INITIAL_DELAY());
+
+        vm.chainId(timelock.ETHEREUM_SEPOLIA_CHAIN_ID());
+        CrottoTimelock sepoliaTimelock = new CrottoTimelock(empty, empty, address(0));
+        assertEq(sepoliaTimelock.getMinDelay(), timelock.DEVELOPMENT_INITIAL_DELAY());
     }
 
     function test_UsesProductionDelayOnOtherChains() public {
