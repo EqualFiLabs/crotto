@@ -35,6 +35,7 @@ contract LotteryTicketFacet is CrottoFacet {
 
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         uint256 roundId = lottery.currentRoundId;
+        if (roundId == 0) revert UnknownRound(roundId);
         Round storage currentRound = lottery.rounds[roundId];
         if (currentRound.status != RoundStatus.Open) revert RoundNotOpen(roundId, currentRound.status);
 
@@ -54,6 +55,7 @@ contract LotteryTicketFacet is CrottoFacet {
         uint256 winnerAmount = Math.mulDiv(ticketValue, currentRound.config.winnerShareBps, CrottoConstants.BPS);
         uint256 nftAmount = Math.mulDiv(ticketValue, currentRound.config.nftShareBps, CrottoConstants.BPS);
         uint256 buybackAmount = Math.mulDiv(ticketValue, currentRound.config.buybackShareBps, CrottoConstants.BPS);
+        // Treasury receives its configured share plus all integer-division dust.
         uint256 treasuryAmount = ticketValue - winnerAmount - nftAmount - buybackAmount;
 
         currentRound.winnerPoolWeth += winnerAmount;

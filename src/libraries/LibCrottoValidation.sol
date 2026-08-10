@@ -60,7 +60,7 @@ library LibCrottoValidation {
         _positive(config.vrfRetryDelay, "vrfRetryDelay");
         _positive(config.requestCallerReward, "requestCallerReward");
         _positive(config.finalizationCallerReward, "finalizationCallerReward");
-        validateAllocation(config.winnerShareBps, config.nftShareBps, config.buybackShareBps, config.treasuryShareBps);
+        validateAllocation(config.winnerShareBps, config.nftShareBps, config.treasuryShareBps, config.buybackShareBps);
 
         if (config.playerRewardRate > type(uint256).max / config.ticketTarget) {
             revert PlayerRewardLiabilityCapacityExceeded(config.playerRewardRate, config.ticketTarget);
