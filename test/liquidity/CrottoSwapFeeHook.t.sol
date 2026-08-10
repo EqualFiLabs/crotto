@@ -383,6 +383,7 @@ contract CrottoSwapFeeHookTest is Test {
         private
         view
     {
+        HookConfiguration memory configuration = _configuration();
         bytes32 feeEvent = keccak256("SwapLegFeeAccrued(bytes32,address,bool,uint256,uint256,uint256,uint256)");
         uint256 found;
         bool sawToken;
@@ -396,15 +397,24 @@ contract CrottoSwapFeeHookTest is Test {
                 abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
             bool inputLeg = uint256(logs[i].topics[3]) != 0;
             if (inputLeg == exactInput) {
-                assertEq(feeAmount, (specifiedAmount * 50 + 9_999) / 10_000, "specified-leg ceil fee");
+                uint256 specifiedFeeBps = exactInput ? configuration.inputFeeBps : configuration.outputFeeBps;
+                assertEq(
+                    feeAmount,
+                    (specifiedAmount * specifiedFeeBps + CrottoConstants.BPS - 1) / CrottoConstants.BPS,
+                    "specified-leg ceil fee"
+                );
             }
+            uint256 expectedPol = feeAmount * configuration.polShareBps / CrottoConstants.BPS;
+            uint256 expectedNft = feeAmount * configuration.nftShareBps / CrottoConstants.BPS;
+            uint256 expectedTreasury = feeAmount - expectedPol - expectedNft;
             assertEq(polAmount + nftAmount + treasuryAmount, feeAmount);
-            assertEq(treasuryAmount, feeAmount - (feeAmount * 5_000 / 10_000) - (feeAmount * 4_000 / 10_000));
+            assertEq(treasuryAmount, expectedTreasury);
             if (activeRewards) {
-                assertEq(nftAmount, feeAmount * 4_000 / 10_000);
+                assertEq(polAmount, expectedPol);
+                assertEq(nftAmount, expectedNft);
             } else {
                 assertEq(nftAmount, 0);
-                assertEq(polAmount, feeAmount * 5_000 / 10_000 + feeAmount * 4_000 / 10_000);
+                assertEq(polAmount, expectedPol + expectedNft);
             }
             ++found;
         }
