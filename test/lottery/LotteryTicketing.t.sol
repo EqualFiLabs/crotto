@@ -422,7 +422,9 @@ contract LotteryTicketingTest is Test {
                 requiredBootstrapWeth: 300,
                 initialTokenPerWethWad: 10_000 ether,
                 maxCombinedHookFeeBps: 200,
-                canonicalTickSpacing: 60
+                canonicalTickSpacing: 60,
+                vrfCallbackGasLimit: 250_000,
+                vrfRequestConfirmations: 3
             }),
             roundConfiguration: RoundConfiguration({
                 ticketPrice: TICKET_PRICE,
