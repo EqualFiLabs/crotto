@@ -75,20 +75,33 @@ contract CrottoHookController is RewardAccountingFacet {
         // Direct sentinel writes keep this storage-isolation check narrow; the fee path itself still uses the real hook,
         // PoolManager, currencies, and permanent position.
         LibRewardsStorage.Layout storage rewards = LibRewardsStorage.layout();
+        rewards.wethBook.indexRay = 9;
+        rewards.wethBook.indexRemainder = 10;
         rewards.wethBook.indexedAmount = 11;
         rewards.wethBook.crystallizedAmount = 12;
         rewards.wethBook.totalClaimable = 13;
+        rewards.tokenBook.indexRay = 19;
+        rewards.tokenBook.indexRemainder = 20;
         rewards.tokenBook.indexedAmount = 21;
         rewards.tokenBook.crystallizedAmount = 22;
         rewards.tokenBook.totalClaimable = 23;
+        rewards.totalActiveWeight = 24;
 
         LibVaultStorage.layout().tokenBacking = 31;
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         lottery.currentRoundId = 41;
         lottery.totalWinnerPoolWethLiability = 42;
         lottery.totalPlayerTokenLiability = 43;
+        lottery.rounds[41].ticketCount = 44;
+        lottery.rounds[41].winnerPoolWeth = 45;
+        lottery.rounds[41].totalPlayerRewardLiability = 46;
+        lottery.rounds[41].unclaimedPlayerRewardLiability = 47;
+        lottery.playerTicketCounts[41][caller] = 48;
+        lottery.playerRewardClaimed[41][caller] = true;
 
         LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        treasury.__reservedLegacyTreasuryWeth = 49;
+        treasury.__reservedLegacyTreasuryToken = 50;
         treasury.operationsReserveEth = 51;
         treasury.totalCallerCreditsEth = 52;
         treasury.callerCreditsEth[caller] = 53;
@@ -99,24 +112,45 @@ contract CrottoHookController is RewardAccountingFacet {
         LibRewardsStorage.Layout storage rewards = LibRewardsStorage.layout();
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
-        return keccak256(
+        bytes32 rewardDigest = keccak256(
             abi.encode(
+                rewards.wethBook.indexRay,
+                rewards.wethBook.indexRemainder,
                 rewards.wethBook.indexedAmount,
                 rewards.wethBook.crystallizedAmount,
                 rewards.wethBook.totalClaimable,
+                rewards.tokenBook.indexRay,
+                rewards.tokenBook.indexRemainder,
                 rewards.tokenBook.indexedAmount,
                 rewards.tokenBook.crystallizedAmount,
                 rewards.tokenBook.totalClaimable,
-                LibVaultStorage.layout().tokenBacking,
+                rewards.totalActiveWeight
+            )
+        );
+        bytes32 lotteryDigest = keccak256(
+            abi.encode(
                 lottery.currentRoundId,
                 lottery.totalWinnerPoolWethLiability,
                 lottery.totalPlayerTokenLiability,
+                lottery.rounds[41].ticketCount,
+                lottery.rounds[41].winnerPoolWeth,
+                lottery.rounds[41].totalPlayerRewardLiability,
+                lottery.rounds[41].unclaimedPlayerRewardLiability,
+                lottery.playerTicketCounts[41][caller],
+                lottery.playerRewardClaimed[41][caller]
+            )
+        );
+        bytes32 treasuryDigest = keccak256(
+            abi.encode(
+                treasury.__reservedLegacyTreasuryWeth,
+                treasury.__reservedLegacyTreasuryToken,
                 treasury.operationsReserveEth,
                 treasury.totalCallerCreditsEth,
                 treasury.callerCreditsEth[caller],
                 treasury.callerRewardCredited[keccak256("isolated-accounting")]
             )
         );
+        return keccak256(abi.encode(rewardDigest, LibVaultStorage.layout().tokenBacking, lotteryDigest, treasuryDigest));
     }
 
     function initialize(PoolKey calldata key, uint160 sqrtPriceX96, uint256 tokenAmount, uint256 wethAmount)
