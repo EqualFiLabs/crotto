@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
+import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {WETH9} from "@chainlink/contracts/src/v0.8/vendor/canonical-weth/WETH9.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
@@ -14,27 +15,36 @@ import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
+import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {ICrottoSwapFeeHook} from "../../src/interfaces/ICrottoSwapFeeHook.sol";
+import {RewardAccountingFacet} from "../../src/diamond/facets/RewardAccountingFacet.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
 import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
+import {LibRewardAccounting} from "../../src/libraries/LibRewardAccounting.sol";
+import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
+import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
 import {CrottoSwapFeeHook} from "../../src/liquidity/CrottoSwapFeeHook.sol";
 import {ActivationToken} from "../../src/token/ActivationToken.sol";
 import {HookConfiguration} from "../../src/types/CrottoTypes.sol";
 
-contract CrottoHookController {
+contract CrottoHookController is RewardAccountingFacet {
     address public hook;
     address public immutable weth;
     bool private initializationAuthorized;
 
     constructor(address weth_) {
         weth = weth_;
+        LibGovernanceStorage.layout().immutableConfiguration.weth = weth_;
+        LibGovernanceStorage.layout().treasuryReceiver = address(0xBEEF);
     }
 
-    function setHook(address hook_) external {
+    function setHook(address hook_, address token_) external {
         require(hook == address(0));
         hook = hook_;
+        LibGovernanceStorage.layout().immutableConfiguration.canonicalHook = hook_;
+        LibGovernanceStorage.layout().immutableConfiguration.activationToken = token_;
     }
 
     function polInitializationAuthorized() external view returns (bool) {
@@ -43,6 +53,19 @@ contract CrottoHookController {
 
     function setHookConfiguration(HookConfiguration calldata configuration) external {
         ICrottoSwapFeeHook(hook).setHookConfiguration(configuration);
+    }
+
+    function setTotalActiveWeight(uint256 weight) external {
+        LibRewardAccounting.setPositionWeight(1, weight == 0 ? 0 : 1, weight);
+    }
+
+    function treasuryReceiver() external view returns (address) {
+        return LibGovernanceStorage.layout().treasuryReceiver;
+    }
+
+    function routedRewards(address asset) external view returns (uint256) {
+        LibRewardsStorage.Layout storage state = LibRewardsStorage.layout();
+        return asset == weth ? state.wethBook.indexedAmount : state.tokenBook.indexedAmount;
     }
 
     function initialize(PoolKey calldata key, uint160 sqrtPriceX96, uint256 tokenAmount, uint256 wethAmount)
@@ -63,6 +86,20 @@ interface IV4TestDeployment {
     function donateRouter() external view returns (address);
 
     function modifyLiquidityRouter() external view returns (address);
+
+    function swapRouter() external view returns (address);
+}
+
+interface IPoolSwapRouter {
+    struct TestSettings {
+        bool takeClaims;
+        bool settleUsingBurn;
+    }
+
+    function swap(PoolKey memory key, SwapParams memory params, TestSettings memory settings, bytes memory hookData)
+        external
+        payable
+        returns (BalanceDelta delta);
 }
 
 interface IPoolDonateRouter {
@@ -99,12 +136,14 @@ contract CrottoSwapFeeHookTest is Test {
     IPoolManager private manager;
     IPoolDonateRouter private donateRouter;
     IPoolModifyLiquidityRouter private modifyLiquidityRouter;
+    IPoolSwapRouter private swapRouter;
 
     function setUp() public {
         IV4TestDeployment v4 = IV4TestDeployment(_deployArtifact("out/V4TestDeployment.sol/V4TestDeployment.json"));
         manager = v4.manager();
         donateRouter = IPoolDonateRouter(v4.donateRouter());
         modifyLiquidityRouter = IPoolModifyLiquidityRouter(v4.modifyLiquidityRouter());
+        swapRouter = IPoolSwapRouter(v4.swapRouter());
         wethToken = new WETH9();
         controller = new CrottoHookController(address(wethToken));
 
@@ -127,7 +166,7 @@ contract CrottoSwapFeeHookTest is Test {
             manager, address(controller), address(token), address(wethToken), TICK_SPACING, TOKEN_PER_WETH_WAD, 100
         );
         assertEq(address(hook), expectedHook);
-        controller.setHook(address(hook));
+        controller.setHook(address(hook), address(token));
         controller.setHookConfiguration(_configuration());
 
         canonicalKey = LibCanonicalPool.key(address(token), address(wethToken), address(hook), TICK_SPACING);
@@ -135,8 +174,10 @@ contract CrottoSwapFeeHookTest is Test {
 
         token.approve(address(hook), type(uint256).max);
         token.approve(address(donateRouter), type(uint256).max);
+        token.approve(address(swapRouter), type(uint256).max);
         wethToken.approve(address(hook), type(uint256).max);
         wethToken.approve(address(donateRouter), type(uint256).max);
+        wethToken.approve(address(swapRouter), type(uint256).max);
     }
 
     function test_MinedAddressAndImmutableBindingsMatchCanonicalPermissions() public view {
@@ -281,6 +322,22 @@ contract CrottoSwapFeeHookTest is Test {
         controller.setHookConfiguration(configuration);
     }
 
+    function test_ExactInputTokenToWethChargesBothLegsAndRedirectsInactiveNftShare() public {
+        _assertBilateralSwap(true, true, false);
+    }
+
+    function test_ExactInputWethToTokenChargesBothLegsAndRoutesActiveNftRewards() public {
+        _assertBilateralSwap(false, true, true);
+    }
+
+    function test_ExactOutputTokenToWethChargesBothLegsAndRoutesActiveNftRewards() public {
+        _assertBilateralSwap(true, false, true);
+    }
+
+    function test_ExactOutputWethToTokenChargesBothLegsAndRedirectsInactiveNftShare() public {
+        _assertBilateralSwap(false, false, false);
+    }
+
     function test_DonationAndCompoundingRequireInitializedPool() public {
         vm.expectRevert(CrottoSwapFeeHook.CanonicalPoolNotInitialized.selector);
         hook.donatePOL(1, 0);
@@ -293,6 +350,71 @@ contract CrottoSwapFeeHookTest is Test {
         wethToken.transfer(address(controller), wethAmount);
         uint160 price = LibCanonicalPool.sqrtPriceX96(address(token), address(wethToken), TOKEN_PER_WETH_WAD);
         controller.initialize(canonicalKey, price, REQUIRED_WETH * 10_000, wethAmount);
+    }
+
+    function _assertBilateralSwap(bool tokenToWeth, bool exactInput, bool activeRewards) private {
+        _initialize(REQUIRED_WETH);
+        _mintWeth(2 ether);
+        controller.setTotalActiveWeight(activeRewards ? 1 : 0);
+
+        bool tokenIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(token);
+        bool zeroForOne = tokenToWeth == tokenIsCurrency0;
+        uint256 amount = tokenToWeth ? (exactInput ? 1_000 ether : 0.05 ether) : (exactInput ? 0.1 ether : 500 ether);
+        SwapParams memory params = SwapParams({
+            zeroForOne: zeroForOne,
+            amountSpecified: exactInput ? -int256(amount) : int256(amount),
+            sqrtPriceLimitX96: zeroForOne ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
+        });
+
+        uint128 liquidityBefore = hook.lockedLiquidity();
+        vm.recordLogs();
+        swapRouter.swap(
+            canonicalKey, params, IPoolSwapRouter.TestSettings({takeClaims: false, settleUsingBurn: false}), ""
+        );
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        _assertFeeEvents(logs, activeRewards, exactInput, amount);
+
+        assertGt(hook.lockedLiquidity(), liquidityBefore);
+        _assertPendingSolvent(Currency.wrap(address(token)));
+        _assertPendingSolvent(Currency.wrap(address(wethToken)));
+    }
+
+    function _assertFeeEvents(Vm.Log[] memory logs, bool activeRewards, bool exactInput, uint256 specifiedAmount)
+        private
+        view
+    {
+        bytes32 feeEvent = keccak256("SwapLegFeeAccrued(bytes32,address,bool,uint256,uint256,uint256,uint256)");
+        uint256 found;
+        bool sawToken;
+        bool sawWeth;
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter != address(hook) || logs[i].topics[0] != feeEvent) continue;
+            address asset = address(uint160(uint256(logs[i].topics[2])));
+            if (asset == address(token)) sawToken = true;
+            if (asset == address(wethToken)) sawWeth = true;
+            (uint256 feeAmount, uint256 polAmount, uint256 nftAmount, uint256 treasuryAmount) =
+                abi.decode(logs[i].data, (uint256, uint256, uint256, uint256));
+            bool inputLeg = uint256(logs[i].topics[3]) != 0;
+            if (inputLeg == exactInput) {
+                assertEq(feeAmount, (specifiedAmount * 50 + 9_999) / 10_000, "specified-leg ceil fee");
+            }
+            assertEq(polAmount + nftAmount + treasuryAmount, feeAmount);
+            assertEq(treasuryAmount, feeAmount - (feeAmount * 5_000 / 10_000) - (feeAmount * 4_000 / 10_000));
+            if (activeRewards) {
+                assertEq(nftAmount, feeAmount * 4_000 / 10_000);
+            } else {
+                assertEq(nftAmount, 0);
+                assertEq(polAmount, feeAmount * 5_000 / 10_000 + feeAmount * 4_000 / 10_000);
+            }
+            ++found;
+        }
+        assertEq(found, 2, "input and output fee events");
+        assertTrue(sawToken && sawWeth, "bilateral assets");
+
+        uint256 routed = controller.routedRewards(address(token)) + controller.routedRewards(address(wethToken));
+        if (activeRewards) assertGt(routed, 0);
+        else assertEq(routed, 0);
+        assertGt(token.balanceOf(controller.treasuryReceiver()) + wethToken.balanceOf(controller.treasuryReceiver()), 0);
     }
 
     function _mintWeth(uint256 amount) private {

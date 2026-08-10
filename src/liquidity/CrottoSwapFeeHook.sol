@@ -3,21 +3,25 @@ pragma solidity 0.8.33;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {BaseHook} from "@uniswap/v4-periphery/src/utils/BaseHook.sol";
 import {LiquidityAmounts} from "@uniswap/v4-periphery/src/libraries/LiquidityAmounts.sol";
 import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
+import {SafeCast} from "@uniswap/v4-core/src/libraries/SafeCast.sol";
 import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
 import {IHooks} from "@uniswap/v4-core/src/interfaces/IHooks.sol";
 import {IUnlockCallback} from "@uniswap/v4-core/src/interfaces/callback/IUnlockCallback.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
-import {BeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
+import {BeforeSwapDelta, toBeforeSwapDelta} from "@uniswap/v4-core/src/types/BeforeSwapDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {ModifyLiquidityParams, SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {IActivationToken} from "../interfaces/IActivationToken.sol";
+import {ICrottoGovernance} from "../interfaces/ICrottoGovernance.sol";
+import {ICrottoRewards} from "../interfaces/ICrottoRewards.sol";
 import {ICrottoSwapFeeHook} from "../interfaces/ICrottoSwapFeeHook.sol";
 import {IPOLInitialization} from "../interfaces/IPOLInitialization.sol";
 import {CrottoConstants} from "../libraries/CrottoConstants.sol";
@@ -29,6 +33,7 @@ import {HookConfiguration} from "../types/CrottoTypes.sol";
 contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
     using SafeERC20 for IERC20;
+    using SafeCast for uint256;
     using StateLibrary for IPoolManager;
 
     uint8 private constant UNLOCK_COMPOUND = 1;
@@ -76,6 +81,7 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
     error UnexpectedTokenDebit(Currency currency, uint256 expected, uint256 actual);
     error IncompatiblePoolCurrency(Currency currency, uint256 expected, uint256 actual);
     error UnexpectedSettlement(Currency currency, uint256 expected, uint256 actual);
+    error UnexpectedTokenAllowance(Currency currency, uint256 remaining);
 
     modifier onlyDiamond() {
         if (msg.sender != crottoDiamond) revert OnlyCrottoDiamond(msg.sender);
@@ -277,22 +283,74 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         revert PermanentLiquidityRemovalForbidden();
     }
 
-    function _beforeSwap(address, PoolKey calldata, SwapParams calldata, bytes calldata)
+    function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
-        pure
         override
         returns (bytes4, BeforeSwapDelta, uint24)
     {
-        revert HookNotImplemented();
+        bool exactInput = params.amountSpecified < 0;
+        uint16 feeBps = exactInput ? _hookConfiguration.inputFeeBps : _hookConfiguration.outputFeeBps;
+        uint256 realized = _absolute(params.amountSpecified);
+        uint256 charged = Math.mulDiv(realized, feeBps, CrottoConstants.BPS, Math.Rounding.Ceil);
+        if (charged == 0) return (IHooks.beforeSwap.selector, toBeforeSwapDelta(0, 0), 0);
+
+        Currency specified = params.zeroForOne == exactInput ? key.currency0 : key.currency1;
+        _takeExact(specified, charged);
+        _allocateAndRoute(specified, charged, exactInput);
+        return (IHooks.beforeSwap.selector, toBeforeSwapDelta(charged.toInt128(), 0), 0);
     }
 
-    function _afterSwap(address, PoolKey calldata, SwapParams calldata, BalanceDelta, bytes calldata)
+    function _afterSwap(address, PoolKey calldata key, SwapParams calldata params, BalanceDelta delta, bytes calldata)
         internal
-        pure
         override
         returns (bytes4, int128)
     {
-        revert HookNotImplemented();
+        bool exactInput = params.amountSpecified < 0;
+        bool specifiedCurrencyIs0 = exactInput == params.zeroForOne;
+        Currency unspecified = specifiedCurrencyIs0 ? key.currency1 : key.currency0;
+        int128 unspecifiedDelta = specifiedCurrencyIs0 ? delta.amount1() : delta.amount0();
+        uint16 feeBps = exactInput ? _hookConfiguration.outputFeeBps : _hookConfiguration.inputFeeBps;
+        uint256 charged =
+            Math.mulDiv(_absolute(int256(unspecifiedDelta)), feeBps, CrottoConstants.BPS, Math.Rounding.Ceil);
+        if (charged != 0) {
+            _takeExact(unspecified, charged);
+            _allocateAndRoute(unspecified, charged, !exactInput);
+        }
+
+        _compoundUnlocked();
+        return (IHooks.afterSwap.selector, charged.toInt128());
+    }
+
+    function _allocateAndRoute(Currency currency, uint256 charged, bool inputLeg) private {
+        HookConfiguration memory configuration = _hookConfiguration;
+        uint256 polAmount = Math.mulDiv(charged, configuration.polShareBps, CrottoConstants.BPS);
+        uint256 nftAmount = Math.mulDiv(charged, configuration.nftShareBps, CrottoConstants.BPS);
+        uint256 treasuryAmount = charged - polAmount - nftAmount;
+        if (ICrottoRewards(crottoDiamond).totalActiveWeight() == 0) {
+            polAmount += nftAmount;
+            nftAmount = 0;
+        }
+
+        _creditPending(currency, polAmount);
+        address asset = Currency.unwrap(currency);
+        if (treasuryAmount != 0) {
+            _transferExact(currency, ICrottoGovernance(crottoDiamond).treasuryReceiver(), treasuryAmount);
+        }
+        _routeRewardRevenue(currency, asset, nftAmount, treasuryAmount);
+        _assertPendingSolvency(currency);
+        emit SwapLegFeeAccrued(_canonicalPoolId, currency, inputLeg, charged, polAmount, nftAmount, treasuryAmount);
+    }
+
+    function _routeRewardRevenue(Currency currency, address asset, uint256 nftAmount, uint256 treasuryAmount) private {
+        if (nftAmount == 0 && treasuryAmount == 0) return;
+        IERC20 token = IERC20(asset);
+        uint256 beforeBalance = currency.balanceOfSelf();
+        if (nftAmount != 0) token.forceApprove(crottoDiamond, nftAmount);
+        ICrottoRewards(crottoDiamond).routeHookRevenue(asset, nftAmount, treasuryAmount);
+        uint256 afterBalance = currency.balanceOfSelf();
+        _enforceExactDebit(currency, beforeBalance, afterBalance, nftAmount);
+        uint256 remainingAllowance = token.allowance(address(this), crottoDiamond);
+        if (remainingAllowance != 0) revert UnexpectedTokenAllowance(currency, remainingAllowance);
     }
 
     function _compoundThroughUnlock() private returns (uint128 liquidityAdded) {
@@ -424,6 +482,17 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         if (received != amount) revert IncompatiblePoolCurrency(currency, amount, received);
         uint256 settled = poolManager.settle();
         if (settled != amount) revert UnexpectedSettlement(currency, amount, settled);
+    }
+
+    function _transferExact(Currency currency, address receiver, uint256 amount) private {
+        uint256 senderBefore = currency.balanceOfSelf();
+        uint256 receiverBefore = currency.balanceOf(receiver);
+        IERC20(Currency.unwrap(currency)).safeTransfer(receiver, amount);
+        uint256 senderAfter = currency.balanceOfSelf();
+        uint256 receiverAfter = currency.balanceOf(receiver);
+        _enforceExactDebit(currency, senderBefore, senderAfter, amount);
+        uint256 received = receiverAfter >= receiverBefore ? receiverAfter - receiverBefore : 0;
+        if (received != amount) revert IncompatiblePoolCurrency(currency, amount, received);
     }
 
     function _assertPendingSolvency(Currency currency) private view {
