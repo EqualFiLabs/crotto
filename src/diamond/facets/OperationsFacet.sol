@@ -10,12 +10,20 @@ import {CrottoFacet} from "../CrottoFacet.sol";
 
 /// @notice Permissionless Operations Reserve funding and pull-based native caller credits.
 contract OperationsFacet is CrottoFacet {
+    address private immutable _facetSelf = address(this);
+
+    error DirectFacetCall();
     error ZeroOperationsContribution();
     error InvalidCallerRewardReceiver(address receiver);
     error NativeTransferFailed(address receiver, uint256 amount);
     error UnexpectedNativeDebit(uint256 expected, uint256 actual);
 
-    function fundOperationsReserve() external payable nonReentrant {
+    modifier onlyDiamond() {
+        if (address(this) == _facetSelf) revert DirectFacetCall();
+        _;
+    }
+
+    function fundOperationsReserve() external payable onlyDiamond nonReentrant {
         if (msg.value == 0) revert ZeroOperationsContribution();
         LibTreasuryStorage.layout().operationsReserveEth += msg.value;
         LibOperationsAccounting.enforceNativeSolvency();

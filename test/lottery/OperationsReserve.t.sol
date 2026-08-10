@@ -89,6 +89,7 @@ contract OperationsReserveTest is Test {
 
     CrottoDiamond private diamond;
     OperationsFacet private operations;
+    OperationsFacet private operationsImplementation;
     OperationsLifecycleHarness private lifecycle;
     NativeCostSink private sink;
 
@@ -111,6 +112,7 @@ contract OperationsReserveTest is Test {
             address(this), cuts, address(initializer), abi.encodeCall(CrottoDiamondInit.initialize, ())
         );
         operations = OperationsFacet(address(diamond));
+        operationsImplementation = operationsFacet;
         lifecycle = OperationsLifecycleHarness(address(diamond));
         sink = new NativeCostSink();
         vm.deal(donor, 100 ether);
@@ -126,6 +128,16 @@ contract OperationsReserveTest is Test {
         assertEq(operations.totalCallerCredits(), 0);
         assertEq(operations.callerCredit(donor), 0);
         assertEq(address(diamond).balance, 5 ether);
+    }
+
+    function test_RevertWhen_FundingFacetImplementationDirectly() public {
+        vm.prank(donor);
+        vm.expectRevert(OperationsFacet.DirectFacetCall.selector);
+        operationsImplementation.fundOperationsReserve{value: 1 ether}();
+
+        assertEq(address(operationsImplementation).balance, 0);
+        assertEq(operations.operationsReserve(), 0);
+        assertEq(address(diamond).balance, 0);
     }
 
     function test_RequestAndRetriesDeductExactCostsWhilePreservingFinalizationFloor() public {
