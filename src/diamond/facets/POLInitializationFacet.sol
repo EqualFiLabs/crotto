@@ -55,7 +55,7 @@ contract POLInitializationFacet is CrottoFacet, IPOLInitialization {
         pol.canonicalPoolId = poolId;
         pol.initialized = true;
         pol.initializationAuthorized = false;
-        emit POLInitialized(msg.sender, poolId, requiredWeth, tokenAmount, liquidity);
+        emit POLInitialized(msg.sender, poolId, bootstrapWeth, tokenAmount, liquidity);
     }
 
     function canInitializePOL() external view returns (bool) {

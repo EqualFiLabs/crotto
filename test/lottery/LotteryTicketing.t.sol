@@ -50,6 +50,7 @@ contract LotteryHookProbe {
     HookConfiguration private storedConfiguration;
 
     function configureBindings(address diamond_, address token_, address weth_) external {
+        require(diamond == address(0));
         diamond = diamond_;
         activationToken = token_;
         weth = weth_;
