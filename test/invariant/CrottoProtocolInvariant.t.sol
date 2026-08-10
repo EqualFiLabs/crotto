@@ -220,8 +220,8 @@ contract CrottoProtocolHandler is Test {
         uint256 roundId = _currentRoundId();
         Round memory current = _round(roundId);
         if (current.status != RoundStatus.Open) return;
+        if (current.ticketCount >= current.config.ticketTarget) return;
         uint256 remaining = current.config.ticketTarget - current.ticketCount;
-        if (remaining == 0) return;
         uint256 quantity = bound(quantitySeed, 1, remaining);
         address actor = _actor(actorSeed);
         uint256 payment = (current.config.ticketPrice + current.config.ticketOperationsFee) * quantity;
@@ -696,6 +696,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         uint256 currentRoundId = _currentRoundId();
         for (uint256 roundId = 1; roundId <= currentRoundId; ++roundId) {
             Round memory current = _round(roundId);
+            assertLe(current.ticketCount, current.config.ticketTarget);
             if (!current.prizeClaimed) winnerLiabilities += current.winnerPoolWeth;
             playerLiabilities += current.unclaimedPlayerRewardLiability;
         }
