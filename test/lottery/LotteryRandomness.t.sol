@@ -15,6 +15,7 @@ import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
+import {LibCrottoGuard} from "../../src/libraries/LibCrottoGuard.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {
@@ -35,6 +36,7 @@ contract NativeVrfWrapperMock {
     uint32 public latestNumWords;
     bytes32 public latestExtraArgsHash;
     bool public refundPayment;
+    bool public callbackDuringRequest;
 
     function setPrice(uint256 value) external {
         price = value;
@@ -46,6 +48,10 @@ contract NativeVrfWrapperMock {
 
     function setRefundPayment(bool value) external {
         refundPayment = value;
+    }
+
+    function setCallbackDuringRequest(bool value) external {
+        callbackDuringRequest = value;
     }
 
     function calculateRequestPriceNative(uint32, uint32) external view returns (uint256) {
@@ -65,6 +71,11 @@ contract NativeVrfWrapperMock {
         latestNumWords = numWords;
         latestExtraArgsHash = keccak256(extraArgs);
         requestId = nextRequestId++;
+        if (callbackDuringRequest) {
+            uint256[] memory words = new uint256[](1);
+            words[0] = 1;
+            ICrotto(msg.sender).rawFulfillRandomWords(requestId, words);
+        }
         if (refundPayment) {
             (bool success,) = msg.sender.call{value: msg.value}("");
             require(success, "refund failed");
@@ -275,6 +286,19 @@ contract LotteryRandomnessTest is Test {
         assertEq(operations.operationsReserve(), 20 ether);
         assertEq(operations.callerCredit(requester), 0);
         assertEq(address(wrapper).balance, 0);
+    }
+
+    function test_RevertWhen_WrapperCallsBackDuringGuardedRequest() public {
+        wrapper.setCallbackDuringRequest(true);
+        vm.prank(requester);
+        vm.expectRevert(LibCrottoGuard.ReentrantCall.selector);
+        randomness.requestRandomness(1);
+
+        assertEq(operations.operationsReserve(), 20 ether);
+        assertEq(operations.callerCredit(requester), 0);
+        assertEq(uint8(views.round(1).status), uint8(RoundStatus.Closed));
+        assertEq(address(wrapper).balance, 0);
+        assertFalse(views.requestRecord(100).known);
     }
 
     function test_RevertWhen_RoundIsUnknownOrNotClosed() public {
