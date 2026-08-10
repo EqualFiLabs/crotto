@@ -53,6 +53,20 @@ contract AutomaticBuybackMathTest is Test {
         assertEq(wethCurrency0.minimumNetTokenOut, wethCurrency1.minimumNetTokenOut);
     }
 
+    function test_FeeCeilingRejectsBudgetsThatLeaveNoPoolInput() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(LibAutomaticBuybackMath.ZeroSpecifiedWethInput.selector, uint256(1), uint16(100))
+        );
+        harness.quote(1, 100, 0, 500, TickMath.getSqrtPriceAtTick(0), true);
+    }
+
+    function test_OutputFeeRoundingRejectsZeroProtectedOutput() public {
+        vm.expectRevert(
+            abi.encodeWithSelector(LibAutomaticBuybackMath.ZeroNetTokenOutput.selector, uint256(2), uint16(100))
+        );
+        harness.quote(2, 0, 100, 500, TickMath.getSqrtPriceAtTick(0), true);
+    }
+
     function test_RevertWhen_NoValidDirectionalPriceLimitRemains() public {
         vm.expectRevert(
             abi.encodeWithSelector(
