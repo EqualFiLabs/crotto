@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {ICrottoRewards} from "../../src/interfaces/ICrottoRewards.sol";
+import {LibCrottoGuard} from "../../src/libraries/LibCrottoGuard.sol";
 import {LibRewardAccounting} from "../../src/libraries/LibRewardAccounting.sol";
 import {LibAssetTransfer} from "../../src/libraries/LibAssetTransfer.sol";
 import {RewardAccountingFacet} from "../../src/diamond/facets/RewardAccountingFacet.sol";
@@ -73,7 +74,7 @@ contract RewardAccountingIntegrationTest is RewardAccountingTestBase {
     function test_RevertWhen_CallerIsNotCanonicalHook() public {
         vm.expectRevert(
             abi.encodeWithSelector(
-                RewardAccountingFacet.UnauthorizedCanonicalHook.selector, address(this), address(hook)
+                LibCrottoGuard.UnauthorizedCanonicalHookCallback.selector, address(this), address(hook)
             )
         );
         rewards.routeHookRevenue(address(weth), 0, 0);

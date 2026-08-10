@@ -8,6 +8,7 @@ import {LibCanonicalPool} from "./LibCanonicalPool.sol";
 import {LibDiamond} from "../diamond/libraries/LibDiamond.sol";
 import {
     ActivationConfiguration,
+    BuybackConfiguration,
     HookConfiguration,
     ImmutableConfiguration,
     RoundConfiguration
@@ -30,6 +31,9 @@ library LibCrottoValidation {
     error InvalidCanonicalTickSpacing(int24 tickSpacing);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
+    error InvalidBuybackSlippage(uint256 slippageBps);
+    error InsufficientBuybackExecutionAmount(uint256 grossWeth, uint256 maximumInputFeeBps);
+    error BuybackSwapCapacityExceeded(uint256 maximumGrossWeth);
 
     function validateImmutableConfiguration(ImmutableConfiguration memory config) internal pure {
         _nonzero(config.activationToken, "activationToken");
@@ -89,15 +93,37 @@ library LibCrottoValidation {
         if (available < required) revert InsufficientRoundOperationsFunding(available, required);
     }
 
+    function validateRoundBuybackCapacity(RoundConfiguration memory config, uint16 maximumInputFeeBps) internal pure {
+        uint256 grossWeth = Math.mulDiv(config.ticketPrice, config.buybackShareBps, CrottoConstants.BPS);
+        uint256 maximumInputFee = Math.mulDiv(grossWeth, maximumInputFeeBps, CrottoConstants.BPS, Math.Rounding.Ceil);
+        if (grossWeth == 0 || maximumInputFee >= grossWeth) {
+            revert InsufficientBuybackExecutionAmount(grossWeth, maximumInputFeeBps);
+        }
+        uint256 maximumGrossWeth =
+            Math.mulDiv(config.ticketPrice * config.ticketTarget, config.buybackShareBps, CrottoConstants.BPS);
+        if (maximumGrossWeth > uint256(uint128(type(int128).max))) {
+            revert BuybackSwapCapacityExceeded(maximumGrossWeth);
+        }
+    }
+
     function validateBootstrapReachability(RoundConfiguration memory config, uint256 requiredBootstrapWeth)
         internal
         pure
     {
         _positive(requiredBootstrapWeth, "requiredBootstrapWeth");
         uint256 nftAllocationPerTicket = Math.mulDiv(config.ticketPrice, config.nftShareBps, CrottoConstants.BPS);
-        uint256 nftAllocationAtSellout = nftAllocationPerTicket * config.ticketTarget;
-        if (nftAllocationAtSellout < requiredBootstrapWeth) {
-            revert BootstrapThresholdUnreachable(nftAllocationAtSellout, requiredBootstrapWeth);
+        uint256 buybackAllocationPerTicket =
+            Math.mulDiv(config.ticketPrice, config.buybackShareBps, CrottoConstants.BPS);
+        uint256 bootstrapAllocationAtSellout =
+            (nftAllocationPerTicket + buybackAllocationPerTicket) * config.ticketTarget;
+        if (bootstrapAllocationAtSellout < requiredBootstrapWeth) {
+            revert BootstrapThresholdUnreachable(bootstrapAllocationAtSellout, requiredBootstrapWeth);
+        }
+    }
+
+    function validateBuybackConfiguration(BuybackConfiguration memory config) internal pure {
+        if (config.slippageBps == 0 || config.slippageBps >= CrottoConstants.BPS) {
+            revert InvalidBuybackSlippage(config.slippageBps);
         }
     }
 

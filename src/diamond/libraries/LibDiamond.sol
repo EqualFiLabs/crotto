@@ -124,13 +124,15 @@ library LibDiamond {
             ds, ICrottoGovernance.setRoundConfiguration.selector
         ) && _selectorInstalled(ds, ICrottoGovernance.setActivationConfiguration.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setHookConfiguration.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.setBuybackConfiguration.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setTreasuryReceiver.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setGuardian.selector)
         && _selectorInstalled(ds, ICrottoGovernance.pauseActions.selector)
         && _selectorInstalled(ds, ICrottoGovernance.unpauseActions.selector)
         && _selectorInstalled(ds, ICrottoGovernance.treasuryReceiver.selector)
         && _selectorInstalled(ds, ICrottoGovernance.guardian.selector)
-        && _selectorInstalled(ds, ICrottoGovernance.pausedActions.selector);
+        && _selectorInstalled(ds, ICrottoGovernance.pausedActions.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.buybackConfiguration.selector);
     }
 
     function _addFunctions(address facet, bytes4[] memory selectors) private {

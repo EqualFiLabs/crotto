@@ -15,7 +15,7 @@ interface ICrotto {
         uint256 ticketPriceWeth,
         uint256 operationsFeeEth,
         uint256 buybackWeth,
-        uint256 totalTicketsSold
+        bool buybackRoutedToBootstrap
     );
     event RoundClosed(uint256 indexed roundId, uint256 ticketCount);
     event RandomnessRequested(

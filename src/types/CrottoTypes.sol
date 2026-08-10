@@ -79,6 +79,11 @@ struct HookConfiguration {
     uint16 treasuryShareBps;
 }
 
+/// @notice Live governed execution tolerance for automatic ticket buybacks.
+struct BuybackConfiguration {
+    uint16 slippageBps;
+}
+
 /// @notice Complete one-time Diamond governance initialization payload.
 struct GovernanceInitialization {
     ImmutableConfiguration immutableConfiguration;
@@ -87,6 +92,7 @@ struct GovernanceInitialization {
     HookConfiguration hookConfiguration;
     address treasuryReceiver;
     address guardian;
+    BuybackConfiguration buybackConfiguration;
 }
 
 /// @notice Complete state and immutable economic snapshot for one round.

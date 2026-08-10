@@ -7,7 +7,12 @@ import {ICrottoGovernance} from "../../interfaces/ICrottoGovernance.sol";
 import {ICrottoSwapFeeHook} from "../../interfaces/ICrottoSwapFeeHook.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
-import {ActivationConfiguration, HookConfiguration, RoundConfiguration} from "../../types/CrottoTypes.sol";
+import {
+    ActivationConfiguration,
+    BuybackConfiguration,
+    HookConfiguration,
+    RoundConfiguration
+} from "../../types/CrottoTypes.sol";
 
 /// @notice Timelock-governed economic configuration and bounded Guardian controls.
 contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
@@ -20,12 +25,23 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         LibGovernanceStorage.Layout storage state = _governanceState();
 
         LibCrottoValidation.validateRoundConfiguration(configuration);
+        LibCrottoValidation.validateRoundBuybackCapacity(
+            configuration, state.immutableConfiguration.maxCombinedHookFeeBps
+        );
         LibCrottoValidation.validateBootstrapReachability(
             configuration, state.immutableConfiguration.requiredBootstrapWeth
         );
         state.roundConfiguration = configuration;
 
         emit RoundConfigurationSet(configuration);
+    }
+
+    function setBuybackConfiguration(BuybackConfiguration calldata configuration) external {
+        LibDiamond.enforceIsContractOwner();
+        LibGovernanceStorage.Layout storage state = _governanceState();
+        LibCrottoValidation.validateBuybackConfiguration(configuration);
+        state.buybackConfiguration = configuration;
+        emit BuybackConfigurationSet(configuration);
     }
 
     function setActivationConfiguration(ActivationConfiguration calldata configuration) external {
@@ -107,6 +123,10 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
 
     function pausedActions() external view returns (uint256) {
         return _governanceState().pausedActions;
+    }
+
+    function buybackConfiguration() external view returns (BuybackConfiguration memory) {
+        return _governanceState().buybackConfiguration;
     }
 
     function _governanceState() private view returns (LibGovernanceStorage.Layout storage state) {

@@ -11,7 +11,6 @@ import {CrottoFacet} from "../CrottoFacet.sol";
 
 /// @notice Two-asset Reward NFT books, views, and authenticated hook revenue routing.
 contract RewardAccountingFacet is CrottoFacet {
-    error UnauthorizedCanonicalHook(address caller, address expectedHook);
     error InvalidRewardAsset(address asset);
 
     /// @notice Pulls and indexes only the Reward NFT leg already allocated by the canonical hook.
@@ -20,11 +19,11 @@ contract RewardAccountingFacet is CrottoFacet {
     /// @param asset Configured WETH or ActivationToken reward asset.
     /// @param rewardAmount Exact Reward NFT allocation to pull from the canonical hook and index.
     /// @param treasuryAmount Treasury allocation already transferred directly by the canonical hook.
-    function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount) external nonReentrant {
+    function routeHookRevenue(address asset, uint256 rewardAmount, uint256 treasuryAmount)
+        external
+        onlyCanonicalHookRevenueCallback(asset)
+    {
         LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
-        address canonicalHook = governance.immutableConfiguration.canonicalHook;
-        if (msg.sender != canonicalHook) revert UnauthorizedCanonicalHook(msg.sender, canonicalHook);
-
         address weth = governance.immutableConfiguration.weth;
         address token = governance.immutableConfiguration.activationToken;
         if (asset != weth && asset != token) revert InvalidRewardAsset(asset);

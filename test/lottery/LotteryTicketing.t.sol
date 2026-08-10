@@ -29,6 +29,7 @@ import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage
 import {RewardNFT} from "../../src/token/RewardNFT.sol";
 import {
     ActivationConfiguration,
+    BuybackConfiguration,
     GovernanceInitialization,
     HookConfiguration,
     ImmutableConfiguration,
@@ -109,9 +110,9 @@ contract LotteryTicketStateFacet {
         return LibPOLStorage.layout().bootstrapWeth;
     }
 
-    function buybackState() external view returns (uint256 wethReserve, uint256 totalTicketsSold) {
+    function reservedLegacyBuybackState() external view returns (uint256 wethReserve, uint256 totalTicketsSold) {
         LibBuybackStorage.Layout storage state = LibBuybackStorage.layout();
-        return (state.wethReserve, state.totalTicketsSold);
+        return (state.__reservedLegacyWethReserve, state.__reservedLegacyTotalTicketsSold);
     }
 
     function winnerLiability() external view returns (uint256) {
@@ -129,11 +130,6 @@ contract LotteryTicketStateFacet {
     function setTotalActiveWeight(uint256 weight) external {
         // Synthetic setup for an otherwise economically expensive routing branch.
         LibRewardsStorage.layout().totalActiveWeight = weight;
-    }
-
-    function setPolInitialized(bool initialized) external {
-        // Synthetic setup for the post-bootstrap routing branch.
-        LibPOLStorage.layout().initialized = initialized;
     }
 
     function setWeth(address weth) external {
@@ -207,7 +203,7 @@ contract LotteryTicketingTest is Test {
     function test_PurchaseWrapsAndRoutesEveryAccountingClassExactly() public {
         uint256 requiredPayment = TICKET_PRICE * 2 + OPERATIONS_FEE * 2;
         vm.expectEmit(true, true, false, true, address(diamond));
-        emit ICrotto.TicketsPurchased(1, player, 2, 0, 2, 202, 0.02 ether, 20, 2);
+        emit ICrotto.TicketsPurchased(1, player, 2, 0, 2, 202, 0.02 ether, 20, true);
         vm.prank(player);
         lottery.buyTickets{value: requiredPayment}(2);
 
@@ -222,17 +218,15 @@ contract LotteryTicketingTest is Test {
         assertEq(batch.endExclusive, 2);
         assertEq(batch.buyer, player);
 
-        (uint256 buybackReserve, uint256 totalTicketsSold) = stateView.buybackState();
-        assertEq(buybackReserve, 20);
-        assertEq(totalTicketsSold, 2);
-        assertEq(stateView.bootstrapWeth(), 60);
+        (uint256 legacyReserve, uint256 legacyTicketsSold) = stateView.reservedLegacyBuybackState();
+        assertEq(legacyReserve, 0);
+        assertEq(legacyTicketsSold, 0);
+        assertEq(stateView.bootstrapWeth(), 80);
         assertEq(stateView.operationsReserve(), 0.02 ether);
         assertEq(address(diamond).balance, 0.02 ether);
         assertEq(weth.balanceOf(treasury), 21);
         assertEq(weth.balanceOf(address(diamond)), 181);
-        assertEq(
-            weth.balanceOf(address(diamond)), storedRound.winnerPoolWeth + stateView.bootstrapWeth() + buybackReserve
-        );
+        assertEq(weth.balanceOf(address(diamond)), storedRound.winnerPoolWeth + stateView.bootstrapWeth());
     }
 
     function test_EligibleRewardNftsReceiveOnlyCurrentPurchaseShare() public {
@@ -242,25 +236,12 @@ contract LotteryTicketingTest is Test {
 
         RewardBook memory book = stateView.wethRewardBook();
         assertEq(book.indexedAmount, 30);
-        assertEq(stateView.bootstrapWeth(), 0);
-        (uint256 buybackReserve,) = stateView.buybackState();
-        assertEq(buybackReserve, 10);
+        assertEq(stateView.bootstrapWeth(), 10);
+        (uint256 legacyReserve,) = stateView.reservedLegacyBuybackState();
+        assertEq(legacyReserve, 0);
         assertEq(weth.balanceOf(treasury), 11);
         assertEq(weth.balanceOf(address(diamond)), 90);
-        assertEq(weth.balanceOf(address(diamond)), views.round(1).winnerPoolWeth + book.indexedAmount + buybackReserve);
-    }
-
-    function test_InactivePostPolShareRoutesDirectlyToTreasury() public {
-        stateView.setPolInitialized(true);
-
-        _buy(player, 1);
-
-        assertEq(stateView.bootstrapWeth(), 0);
-        assertEq(stateView.wethRewardBook().indexedAmount, 0);
-        (uint256 buybackReserve,) = stateView.buybackState();
-        assertEq(buybackReserve, 10);
-        assertEq(weth.balanceOf(treasury), 41);
-        assertEq(weth.balanceOf(address(diamond)), 60);
+        assertEq(weth.balanceOf(address(diamond)), views.round(1).winnerPoolWeth + book.indexedAmount + 10);
     }
 
     function test_TreasuryReceiverChangeAppliesOnlyToFuturePurchases() public {
@@ -283,10 +264,10 @@ contract LotteryTicketingTest is Test {
         assertEq(storedRound.ticketCount, TICKET_TARGET);
         assertEq(views.remainingTickets(1), 0);
         assertEq(storedRound.winnerPoolWeth, 505);
-        assertEq(stateView.bootstrapWeth(), 303);
-        (uint256 buybackReserve, uint256 totalTicketsSold) = stateView.buybackState();
-        assertEq(buybackReserve, 101);
-        assertEq(totalTicketsSold, TICKET_TARGET);
+        assertEq(stateView.bootstrapWeth(), 404);
+        (uint256 legacyReserve, uint256 legacyTicketsSold) = stateView.reservedLegacyBuybackState();
+        assertEq(legacyReserve, 0);
+        assertEq(legacyTicketsSold, 0);
         assertEq(weth.balanceOf(treasury), 101);
 
         vm.prank(player);
@@ -342,7 +323,7 @@ contract LotteryTicketingTest is Test {
         assertEq(address(diamond).balance, 0);
         assertEq(weth.balanceOf(address(diamond)), 0);
         assertEq(stateView.operationsReserve(), 0);
-        (uint256 reserve, uint256 sold) = stateView.buybackState();
+        (uint256 reserve, uint256 sold) = stateView.reservedLegacyBuybackState();
         assertEq(reserve, 0);
         assertEq(sold, 0);
     }
@@ -376,12 +357,9 @@ contract LotteryTicketingTest is Test {
         LotteryTicketFacet(address(uninitializedDiamond)).buyTickets(1);
     }
 
-    function testFuzz_PurchaseAllocationConservesWrappedValue(uint256 quantity, bool activeNfts, bool polInitialized)
-        public
-    {
+    function testFuzz_PrePolPurchaseAllocationConservesWrappedValue(uint256 quantity, bool activeNfts) public {
         quantity = bound(quantity, 1, TICKET_TARGET);
         if (activeNfts) stateView.setTotalActiveWeight(10);
-        else if (polInitialized) stateView.setPolInitialized(true);
 
         _buy(player, quantity);
 
@@ -392,7 +370,6 @@ contract LotteryTicketingTest is Test {
         uint256 treasuryAmount = ticketValue - winnerAmount - nftAmount - buybackAmount;
         uint256 retainedWeth = winnerAmount + buybackAmount;
         if (activeNfts) retainedWeth += nftAmount;
-        else if (polInitialized) treasuryAmount += nftAmount;
         else retainedWeth += nftAmount;
 
         assertEq(weth.balanceOf(address(diamond)), retainedWeth);
@@ -400,9 +377,9 @@ contract LotteryTicketingTest is Test {
         assertEq(retainedWeth + treasuryAmount, ticketValue);
         assertEq(stateView.operationsReserve(), OPERATIONS_FEE * quantity);
         assertEq(address(diamond).balance, OPERATIONS_FEE * quantity);
-        (uint256 reserve, uint256 sold) = stateView.buybackState();
-        assertEq(reserve, buybackAmount);
-        assertEq(sold, quantity);
+        (uint256 reserve, uint256 sold) = stateView.reservedLegacyBuybackState();
+        assertEq(reserve, 0);
+        assertEq(sold, 0);
     }
 
     function test_RevertWhen_WethDepositDoesNotMintExactValue() public {
@@ -440,7 +417,7 @@ contract LotteryTicketingTest is Test {
         assertEq(stateView.bootstrapWeth(), 0);
         assertEq(address(diamond).balance, 0);
         assertEq(IERC20(wethAddress).balanceOf(address(diamond)), 0);
-        (uint256 reserve, uint256 sold) = stateView.buybackState();
+        (uint256 reserve, uint256 sold) = stateView.reservedLegacyBuybackState();
         assertEq(reserve, 0);
         assertEq(sold, 0);
     }
@@ -492,7 +469,8 @@ contract LotteryTicketingTest is Test {
                 inputFeeBps: 50, outputFeeBps: 50, polShareBps: 5_000, nftShareBps: 4_000, treasuryShareBps: 1_000
             }),
             treasuryReceiver: treasury,
-            guardian: guardian
+            guardian: guardian,
+            buybackConfiguration: BuybackConfiguration({slippageBps: 500})
         });
     }
 
@@ -523,17 +501,19 @@ contract LotteryTicketingTest is Test {
     }
 
     function _governanceSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](10);
+        selectors = new bytes4[](12);
         selectors[0] = ICrottoGovernance.setRoundConfiguration.selector;
         selectors[1] = ICrottoGovernance.setActivationConfiguration.selector;
         selectors[2] = ICrottoGovernance.setHookConfiguration.selector;
         selectors[3] = ICrottoGovernance.setTreasuryReceiver.selector;
-        selectors[4] = ICrottoGovernance.setGuardian.selector;
-        selectors[5] = ICrottoGovernance.pauseActions.selector;
-        selectors[6] = ICrottoGovernance.unpauseActions.selector;
-        selectors[7] = ICrottoGovernance.treasuryReceiver.selector;
-        selectors[8] = ICrottoGovernance.guardian.selector;
-        selectors[9] = ICrottoGovernance.pausedActions.selector;
+        selectors[4] = ICrottoGovernance.setBuybackConfiguration.selector;
+        selectors[5] = ICrottoGovernance.setGuardian.selector;
+        selectors[6] = ICrottoGovernance.pauseActions.selector;
+        selectors[7] = ICrottoGovernance.unpauseActions.selector;
+        selectors[8] = ICrottoGovernance.treasuryReceiver.selector;
+        selectors[9] = ICrottoGovernance.guardian.selector;
+        selectors[10] = ICrottoGovernance.pausedActions.selector;
+        selectors[11] = ICrottoGovernance.buybackConfiguration.selector;
     }
 
     function _ticketSelectors() private pure returns (bytes4[] memory selectors) {
@@ -556,15 +536,14 @@ contract LotteryTicketingTest is Test {
     }
 
     function _stateSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](9);
+        selectors = new bytes4[](8);
         selectors[0] = LotteryTicketStateFacet.operationsReserve.selector;
         selectors[1] = LotteryTicketStateFacet.bootstrapWeth.selector;
-        selectors[2] = LotteryTicketStateFacet.buybackState.selector;
+        selectors[2] = LotteryTicketStateFacet.reservedLegacyBuybackState.selector;
         selectors[3] = LotteryTicketStateFacet.wethRewardBook.selector;
         selectors[4] = LotteryTicketStateFacet.totalActiveWeight.selector;
         selectors[5] = LotteryTicketStateFacet.setTotalActiveWeight.selector;
-        selectors[6] = LotteryTicketStateFacet.setPolInitialized.selector;
-        selectors[7] = LotteryTicketStateFacet.setWeth.selector;
-        selectors[8] = LotteryTicketStateFacet.winnerLiability.selector;
+        selectors[6] = LotteryTicketStateFacet.setWeth.selector;
+        selectors[7] = LotteryTicketStateFacet.winnerLiability.selector;
     }
 }

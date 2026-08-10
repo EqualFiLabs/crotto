@@ -22,6 +22,8 @@ library CrottoConstants {
     uint16 internal constant INITIAL_HOOK_NFT_SHARE_BPS = 4_000;
     uint16 internal constant INITIAL_HOOK_TREASURY_SHARE_BPS = 1_000;
 
+    uint16 internal constant INITIAL_BUYBACK_SLIPPAGE_BPS = 500;
+
     uint256 internal constant PAUSE_TICKET_PURCHASES = 1 << 0;
     uint256 internal constant PAUSE_NFT_ACTIVATIONS = 1 << 1;
     uint256 internal constant PAUSE_VAULT_PURCHASES = 1 << 2;
