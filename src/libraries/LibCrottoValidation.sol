@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {CrottoConstants} from "./CrottoConstants.sol";
+import {LibDiamond} from "../diamond/libraries/LibDiamond.sol";
 import {
     ActivationConfiguration,
     HookConfiguration,
@@ -104,6 +105,7 @@ library LibCrottoValidation {
                 || receiver == immutableConfig.rewardNFT || receiver == immutableConfig.weth
                 || receiver == immutableConfig.vrfWrapper || receiver == immutableConfig.uniswapV4PoolManager
                 || receiver == immutableConfig.canonicalHook
+                || LibDiamond.diamondStorage().facetFunctionSelectors[receiver].functionSelectors.length != 0
         ) revert TreasuryReceiverIsProtocol(receiver);
     }
 

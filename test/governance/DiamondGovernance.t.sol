@@ -15,6 +15,7 @@ import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondIni
 import {LibDiamond} from "../../src/diamond/libraries/LibDiamond.sol";
 import {CrottoTimelock} from "../../src/governance/CrottoTimelock.sol";
 import {RewardNFT} from "../../src/token/RewardNFT.sol";
+import {ActivationToken} from "../../src/token/ActivationToken.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {IRewardNFT} from "../../src/interfaces/IRewardNFT.sol";
 import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
@@ -82,6 +83,24 @@ contract RewardNftCustomInterfaceOnlyProbe is RewardNftWithoutErc165Probe {
 
     function supportsInterface(bytes4 interfaceId) external pure returns (bool) {
         return interfaceId == type(IERC165).interfaceId || interfaceId == type(IRewardNFT).interfaceId;
+    }
+}
+
+contract ActivationTokenBindingProbe {
+    address private immutable CROTTO_DIAMOND;
+    address private immutable CANONICAL_HOOK;
+
+    constructor(address crottoDiamond_, address canonicalHook_) {
+        CROTTO_DIAMOND = crottoDiamond_;
+        CANONICAL_HOOK = canonicalHook_;
+    }
+
+    function crottoDiamond() external view returns (address) {
+        return CROTTO_DIAMOND;
+    }
+
+    function canonicalHook() external view returns (address) {
+        return CANONICAL_HOOK;
     }
 }
 
@@ -192,6 +211,7 @@ contract DiamondGovernanceTest is Test {
     CrottoTimelock private timelock;
     GovernedHookProbe private hook;
     RewardNFT private rewardNft;
+    ActivationToken private activationToken;
     CrottoDiamond private diamond;
     ICrottoGovernance private governance;
     GovernanceStateProbeFacet private stateProbe;
@@ -224,8 +244,9 @@ contract DiamondGovernanceTest is Test {
         initialCut[4] = _facetCut(address(stateProbeImplementation), _stateProbeSelectors());
         initialCut[5] = _facetCut(address(pauseProbeImplementation), _pauseProbeSelectors());
 
-        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         rewardNft = new RewardNFT(predictedDiamond, 10_000);
+        activationToken = new ActivationToken(treasury, predictedDiamond, address(hook));
         GovernanceInitialization memory initialization = _validInitialization();
         diamond = new CrottoDiamond(
             address(timelock),
@@ -245,6 +266,8 @@ contract DiamondGovernanceTest is Test {
         assertEq(stateProbe.immutableConfiguration().rewardNFT, address(rewardNft));
         assertEq(rewardNft.crottoDiamond(), address(diamond));
         assertEq(rewardNft.maxSupply(), stateProbe.immutableConfiguration().rewardNFTMaxSupply);
+        assertEq(activationToken.crottoDiamond(), address(diamond));
+        assertEq(activationToken.canonicalHook(), address(hook));
         assertEq(stateProbe.roundConfiguration().ticketTarget, 100);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 1);
@@ -267,6 +290,74 @@ contract DiamondGovernanceTest is Test {
         initialization.immutableConfiguration.canonicalHook = stranger;
 
         vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.CanonicalHookHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_ActivationTokenHasNoCode() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+        initialization.immutableConfiguration.activationToken = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.ActivationTokenHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_ActivationTokenNamesDifferentDiamond() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.ActivationTokenDiamondMismatch.selector,
+                address(activationToken),
+                address(diamond),
+                predictedDiamond
+            )
+        );
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_ActivationTokenNamesDifferentHook() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
+        ActivationTokenBindingProbe mismatchedToken = new ActivationTokenBindingProbe(predictedDiamond, stranger);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+        initialization.immutableConfiguration.activationToken = address(mismatchedToken);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDiamondInit.ActivationTokenHookMismatch.selector,
+                address(mismatchedToken),
+                stranger,
+                address(hook)
+            )
+        );
         new CrottoDiamond(
             address(timelock),
             initialCut,
@@ -444,6 +535,15 @@ contract DiamondGovernanceTest is Test {
             abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, protocolSatellite)
         );
         governance.setTreasuryReceiver(protocolSatellite);
+
+        assertEq(governance.treasuryReceiver(), treasury);
+    }
+
+    function test_RevertWhen_TimelockSetsInstalledFacetAsTreasuryReceiver() public {
+        address installedFacet = address(governanceImplementation);
+        vm.prank(address(timelock));
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.TreasuryReceiverIsProtocol.selector, installedFacet));
+        governance.setTreasuryReceiver(installedFacet);
 
         assertEq(governance.treasuryReceiver(), treasury);
     }
@@ -658,7 +758,7 @@ contract DiamondGovernanceTest is Test {
     function _validInitialization() private view returns (GovernanceInitialization memory initialization) {
         initialization = GovernanceInitialization({
             immutableConfiguration: ImmutableConfiguration({
-                activationToken: address(0x1001),
+                activationToken: address(activationToken),
                 rewardNFT: address(rewardNft),
                 weth: address(0x1003),
                 vrfWrapper: address(0x1004),

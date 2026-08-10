@@ -81,6 +81,7 @@ contract ConfigurableActivationAsset is ERC20 {
 
     address public rejectedReceiver;
     bool public feeEnabled;
+    bool public burnNoOp;
 
     constructor() ERC20("Activation Test", "ACT") {}
 
@@ -89,6 +90,7 @@ contract ConfigurableActivationAsset is ERC20 {
     }
 
     function burn(uint256 amount) external {
+        if (burnNoOp) return;
         _burn(msg.sender, amount);
     }
 
@@ -98,6 +100,10 @@ contract ConfigurableActivationAsset is ERC20 {
 
     function setRejectedReceiver(address receiver) external {
         rejectedReceiver = receiver;
+    }
+
+    function setBurnNoOp(bool enabled) external {
+        burnNoOp = enabled;
     }
 
     function _update(address from, address to, uint256 value) internal override {
@@ -152,7 +158,7 @@ contract RewardNFTActivationTest is Test {
         vm.expectEmit(true, false, false, true, address(diamond));
         emit ICrottoRewards.ActivationFeeRouted(tokenId, 25 ether, 0, 75 ether);
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 100 ether);
 
         NFTRewardPosition memory position = activation.nftRewardPosition(tokenId);
         assertEq(position.tier, 1);
@@ -168,10 +174,10 @@ contract RewardNFTActivationTest is Test {
         uint256 first = activation.mintRewardNFT(alice);
         uint256 second = activation.mintRewardNFT(bob);
         vm.prank(alice);
-        activation.activateNextTier(first);
+        activation.activateNextTier(first, 1, 100 ether);
 
         vm.prank(bob);
-        activation.activateNextTier(second);
+        activation.activateNextTier(second, 1, 100 ether);
 
         (, uint256 firstPending) = activation.pendingNFTRewards(first);
         (, uint256 secondPending) = activation.pendingNFTRewards(second);
@@ -185,14 +191,14 @@ contract RewardNFTActivationTest is Test {
         uint256 first = activation.mintRewardNFT(alice);
         uint256 second = activation.mintRewardNFT(bob);
         vm.prank(alice);
-        activation.activateNextTier(first);
+        activation.activateNextTier(first, 1, 100 ether);
         vm.prank(bob);
-        activation.activateNextTier(second);
+        activation.activateNextTier(second, 1, 100 ether);
 
         (, uint256 firstBefore) = activation.pendingNFTRewards(first);
         (, uint256 secondBefore) = activation.pendingNFTRewards(second);
         vm.prank(alice);
-        activation.activateNextTier(first);
+        activation.activateNextTier(first, 1, 200 ether);
 
         (, uint256 firstAfter) = activation.pendingNFTRewards(first);
         (, uint256 secondAfter) = activation.pendingNFTRewards(second);
@@ -206,7 +212,7 @@ contract RewardNFTActivationTest is Test {
     function test_GovernanceChangesAreProspectiveAndVersioned() public {
         uint256 tokenId = activation.mintRewardNFT(alice);
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 100 ether);
 
         ActivationConfiguration memory next = _configuration();
         next.costs = [uint256(125 ether), 250 ether, 400 ether];
@@ -216,11 +222,40 @@ contract RewardNFTActivationTest is Test {
         vm.expectEmit(true, true, true, true, address(diamond));
         emit ICrottoRewards.NFTTierActivated(tokenId, 1, 2, 250 ether, 7, 2);
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 2, 250 ether);
 
         NFTRewardPosition memory position = activation.nftRewardPosition(tokenId);
         assertEq(position.tier, 2);
         assertEq(position.storedWeight, 7);
+    }
+
+    function test_RevertWhen_ExpectedConfigurationVersionChanges() public {
+        uint256 tokenId = activation.mintRewardNFT(alice);
+        ActivationConfiguration memory next = _configuration();
+        next.costs[0] = 125 ether;
+        activation.setActivationConfiguration(next);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(RewardActivationFacet.ActivationConfigurationChanged.selector, uint64(1), uint64(2))
+        );
+        vm.prank(alice);
+        activation.activateNextTier(tokenId, 1, 100 ether);
+
+        assertEq(token.balanceOf(alice), 2_000 ether);
+        assertEq(activation.nftRewardPosition(tokenId).tier, 0);
+    }
+
+    function test_RevertWhen_CurrentCostExceedsCallerMaximum() public {
+        uint256 tokenId = activation.mintRewardNFT(alice);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(RewardActivationFacet.ActivationCostExceedsMaximum.selector, 100 ether, 99 ether)
+        );
+        vm.prank(alice);
+        activation.activateNextTier(tokenId, 1, 99 ether);
+
+        assertEq(token.balanceOf(alice), 2_000 ether);
+        assertEq(activation.nftRewardPosition(tokenId).tier, 0);
     }
 
     function test_RoundingRemainderIsPaidToTreasury() public {
@@ -230,7 +265,7 @@ contract RewardNFTActivationTest is Test {
         uint256 tokenId = activation.mintRewardNFT(alice);
 
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 2, 101);
 
         assertEq(token.balanceOf(treasury), 76);
         assertEq(token.balanceOf(address(diamond)), 0);
@@ -240,19 +275,19 @@ contract RewardNFTActivationTest is Test {
         uint256 tokenId = activation.mintRewardNFT(alice);
         vm.expectRevert(abi.encodeWithSelector(RewardActivationFacet.NotRewardNFTOwner.selector, tokenId, bob, alice));
         vm.prank(bob);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 100 ether);
     }
 
     function test_RevertWhen_AlreadyAtMaximumTier() public {
         uint256 tokenId = activation.mintRewardNFT(alice);
         for (uint256 i; i < 3; ++i) {
             vm.prank(alice);
-            activation.activateNextTier(tokenId);
+            activation.activateNextTier(tokenId, 1, 300 ether);
         }
 
         vm.expectRevert(abi.encodeWithSelector(RewardActivationFacet.MaximumTierReached.selector, tokenId));
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 300 ether);
     }
 
     function test_RevertWhen_ActivationsArePaused() public {
@@ -261,7 +296,7 @@ contract RewardNFTActivationTest is Test {
 
         vm.expectRevert(abi.encodeWithSelector(CrottoFacet.ActionPaused.selector, uint256(2)));
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 100 ether);
     }
 
     function test_RevertWhen_TOKENReceiptIsNotExact() public {
@@ -283,7 +318,7 @@ contract RewardNFTActivationTest is Test {
             )
         );
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 100 ether);
 
         assertEq(activation.nftRewardPosition(tokenId).tier, 0);
         assertEq(feeToken.balanceOf(alice), 1_000 ether);
@@ -301,12 +336,30 @@ contract RewardNFTActivationTest is Test {
 
         vm.expectRevert(bytes("REJECTED_RECEIVER"));
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 1, 100 ether);
 
         assertEq(activation.nftRewardPosition(tokenId).tier, 0);
         assertEq(rejectingToken.totalSupply(), supplyBefore);
         assertEq(rejectingToken.balanceOf(alice), 1_000 ether);
         assertEq(rejectingToken.balanceOf(address(diamond)), 0);
+    }
+
+    function test_RevertWhen_ActivationBurnDoesNotReduceBalanceAndSupply() public {
+        ConfigurableActivationAsset noOpBurnToken = new ConfigurableActivationAsset();
+        noOpBurnToken.mint(alice, 1_000 ether);
+        activation.configureActivation(address(noOpBurnToken), address(rewardNft), treasury, _configuration());
+        vm.prank(alice);
+        noOpBurnToken.approve(address(diamond), type(uint256).max);
+        noOpBurnToken.setBurnNoOp(true);
+        uint256 tokenId = activation.mintRewardNFT(alice);
+
+        vm.expectRevert(abi.encodeWithSelector(RewardActivationFacet.ActivationBurnMismatch.selector, 25 ether, 0, 0));
+        vm.prank(alice);
+        activation.activateNextTier(tokenId, 1, 100 ether);
+
+        assertEq(noOpBurnToken.balanceOf(alice), 1_000 ether);
+        assertEq(noOpBurnToken.balanceOf(address(diamond)), 0);
+        assertEq(activation.nftRewardPosition(tokenId).tier, 0);
     }
 
     function testFuzz_ActivationAllocationConservesPayment(uint256 cost) public {
@@ -319,7 +372,7 @@ contract RewardNFTActivationTest is Test {
         uint256 supplyBefore = token.totalSupply();
 
         vm.prank(alice);
-        activation.activateNextTier(tokenId);
+        activation.activateNextTier(tokenId, 2, cost);
 
         uint256 burned = supplyBefore - token.totalSupply();
         assertEq(userBefore - token.balanceOf(alice), cost);
