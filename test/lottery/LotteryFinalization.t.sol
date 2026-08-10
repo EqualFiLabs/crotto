@@ -246,11 +246,15 @@ contract LotteryFinalizationTest is Test {
         _sellOut();
         vm.prank(playerA);
         vm.expectRevert(
-            abi.encodeWithSelector(
-                LotteryFinalizationFacet.RoundNotReadyForFinalization.selector, 1, RoundStatus.Closed
-            )
+            abi.encodeWithSelector(LotteryFinalizationFacet.RoundNotFinalized.selector, 1, RoundStatus.Closed)
         );
         finalization.claimPlayerRewards(1, playerA);
+
+        vm.prank(playerA);
+        vm.expectRevert(
+            abi.encodeWithSelector(LotteryFinalizationFacet.RoundNotFinalized.selector, 1, RoundStatus.Closed)
+        );
+        finalization.claimWinnings(1, playerA);
 
         vm.expectRevert(
             abi.encodeWithSelector(

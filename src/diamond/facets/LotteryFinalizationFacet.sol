@@ -17,6 +17,7 @@ import {CrottoFacet} from "../CrottoFacet.sol";
 contract LotteryFinalizationFacet is CrottoFacet {
     error UnknownRound(uint256 roundId);
     error RoundNotReadyForFinalization(uint256 roundId, RoundStatus status);
+    error RoundNotFinalized(uint256 roundId, RoundStatus status);
     error InvalidTicketBatches(uint256 roundId);
     error NotLotteryWinner(uint256 roundId, address caller, address winner);
     error PrizeAlreadyClaimed(uint256 roundId);
@@ -56,7 +57,7 @@ contract LotteryFinalizationFacet is CrottoFacet {
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         Round storage finalizedRound = _round(lottery, roundId);
         if (finalizedRound.status != RoundStatus.Finalized) {
-            revert RoundNotReadyForFinalization(roundId, finalizedRound.status);
+            revert RoundNotFinalized(roundId, finalizedRound.status);
         }
         if (msg.sender != finalizedRound.winner) {
             revert NotLotteryWinner(roundId, msg.sender, finalizedRound.winner);
@@ -76,7 +77,7 @@ contract LotteryFinalizationFacet is CrottoFacet {
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         Round storage finalizedRound = _round(lottery, roundId);
         if (finalizedRound.status != RoundStatus.Finalized) {
-            revert RoundNotReadyForFinalization(roundId, finalizedRound.status);
+            revert RoundNotFinalized(roundId, finalizedRound.status);
         }
         if (lottery.playerRewardClaimed[roundId][msg.sender]) {
             revert PlayerRewardAlreadyClaimed(roundId, msg.sender);
