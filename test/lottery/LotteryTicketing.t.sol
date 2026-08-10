@@ -323,6 +323,18 @@ contract LotteryTicketingTest is Test {
         ticketing.ticketQuote(2, 1);
     }
 
+    function test_RevertWhen_TicketPurchasePrecedesRoundInitialization() public {
+        LotteryTicketFacet ticketFacet = new LotteryTicketFacet();
+        bytes4[] memory selectors = new bytes4[](1);
+        selectors[0] = LotteryTicketFacet.buyTickets.selector;
+        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](1);
+        cuts[0] = _facetCut(address(ticketFacet), selectors);
+        CrottoDiamond uninitializedDiamond = new CrottoDiamond(address(this), cuts, address(0), bytes(""));
+
+        vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.UnknownRound.selector, 0));
+        LotteryTicketFacet(address(uninitializedDiamond)).buyTickets(1);
+    }
+
     function testFuzz_PurchaseAllocationConservesWrappedValue(uint256 quantity, bool activeNfts, bool polInitialized)
         public
     {

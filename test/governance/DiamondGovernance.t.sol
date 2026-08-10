@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
+import {WETH9} from "@chainlink/contracts/src/v0.8/vendor/canonical-weth/WETH9.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Metadata} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -218,6 +219,7 @@ contract DiamondGovernanceTest is Test {
     address private stranger = makeAddr("stranger");
 
     CrottoTimelock private timelock;
+    WETH9 private weth;
     GovernedHookProbe private hook;
     RewardNFT private rewardNft;
     ActivationToken private activationToken;
@@ -236,6 +238,7 @@ contract DiamondGovernanceTest is Test {
         executors[0] = address(0);
         timelock = new CrottoTimelock(proposers, executors, address(0));
 
+        weth = new WETH9();
         hook = new GovernedHookProbe();
         DiamondCutFacet cutFacet = new DiamondCutFacet();
         DiamondLoupeFacet loupeFacet = new DiamondLoupeFacet();
@@ -817,7 +820,7 @@ contract DiamondGovernanceTest is Test {
             immutableConfiguration: ImmutableConfiguration({
                 activationToken: address(activationToken),
                 rewardNFT: address(rewardNft),
-                weth: address(hook),
+                weth: address(weth),
                 vrfWrapper: address(0x1004),
                 uniswapV4PoolManager: address(0x1005),
                 canonicalHook: address(hook),
