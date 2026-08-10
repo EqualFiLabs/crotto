@@ -5,6 +5,7 @@ import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Metadata} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
 import {ERC165Checker} from "@openzeppelin/contracts/utils/introspection/ERC165Checker.sol";
+import {IImmutableState} from "@uniswap/v4-periphery/src/interfaces/IImmutableState.sol";
 import {IDiamondCut} from "../../interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../interfaces/diamond/IERC173.sol";
@@ -30,6 +31,13 @@ contract CrottoDiamondInit {
     error VrfWrapperHasNoCode(address wrapper);
     error ActivationTokenDiamondMismatch(address token, address configuredDiamond, address expectedDiamond);
     error ActivationTokenHookMismatch(address token, address configuredHook, address expectedHook);
+    error CanonicalHookDiamondMismatch(address hook, address configuredDiamond, address expectedDiamond);
+    error CanonicalHookTokenMismatch(address hook, address configuredToken, address expectedToken);
+    error CanonicalHookWethMismatch(address hook, address configuredWeth, address expectedWeth);
+    error CanonicalHookPoolManagerMismatch(address hook, address configuredManager, address expectedManager);
+    error CanonicalHookTickSpacingMismatch(address hook, int24 configuredSpacing, int24 expectedSpacing);
+    error CanonicalHookGenesisRatioMismatch(address hook, uint256 configuredRatio, uint256 expectedRatio);
+    error CanonicalHookFeeCeilingMismatch(address hook, uint16 configuredCeiling, uint16 expectedCeiling);
 
     function initialize() external {
         _validateCoreSelectors();
@@ -65,6 +73,7 @@ contract CrottoDiamondInit {
         address hook = initialization.immutableConfiguration.canonicalHook;
         if (hook.code.length == 0) revert CanonicalHookHasNoCode(hook);
         _validateActivationToken(initialization);
+        _validateCanonicalHook(initialization);
 
         LibGovernanceStorage.Layout storage state = LibGovernanceStorage.layout();
         state.immutableConfiguration = initialization.immutableConfiguration;
@@ -88,6 +97,46 @@ contract CrottoDiamondInit {
         emit ICrottoGovernance.HookConfigurationSet(initialization.hookConfiguration);
         emit ICrottoGovernance.TreasuryReceiverChanged(address(0), initialization.treasuryReceiver);
         emit ICrottoGovernance.GuardianChanged(address(0), initialization.guardian);
+    }
+
+    function _validateCanonicalHook(GovernanceInitialization calldata initialization) private view {
+        address hook = initialization.immutableConfiguration.canonicalHook;
+        address configuredDiamond = ICrottoSwapFeeHook(hook).crottoDiamond();
+        if (configuredDiamond != address(this)) {
+            revert CanonicalHookDiamondMismatch(hook, configuredDiamond, address(this));
+        }
+
+        address expectedToken = initialization.immutableConfiguration.activationToken;
+        address configuredToken = ICrottoSwapFeeHook(hook).activationToken();
+        if (configuredToken != expectedToken) revert CanonicalHookTokenMismatch(hook, configuredToken, expectedToken);
+
+        address expectedWeth = initialization.immutableConfiguration.weth;
+        address configuredWeth = ICrottoSwapFeeHook(hook).weth();
+        if (configuredWeth != expectedWeth) revert CanonicalHookWethMismatch(hook, configuredWeth, expectedWeth);
+
+        address expectedManager = initialization.immutableConfiguration.uniswapV4PoolManager;
+        address configuredManager = address(IImmutableState(hook).poolManager());
+        if (configuredManager != expectedManager) {
+            revert CanonicalHookPoolManagerMismatch(hook, configuredManager, expectedManager);
+        }
+
+        int24 expectedSpacing = initialization.immutableConfiguration.canonicalTickSpacing;
+        int24 configuredSpacing = ICrottoSwapFeeHook(hook).canonicalTickSpacing();
+        if (configuredSpacing != expectedSpacing) {
+            revert CanonicalHookTickSpacingMismatch(hook, configuredSpacing, expectedSpacing);
+        }
+
+        uint256 expectedRatio = initialization.immutableConfiguration.initialTokenPerWethWad;
+        uint256 configuredRatio = ICrottoSwapFeeHook(hook).initialTokenPerWethWad();
+        if (configuredRatio != expectedRatio) {
+            revert CanonicalHookGenesisRatioMismatch(hook, configuredRatio, expectedRatio);
+        }
+
+        uint16 expectedCeiling = initialization.immutableConfiguration.maxCombinedHookFeeBps;
+        uint16 configuredCeiling = ICrottoSwapFeeHook(hook).maxCombinedHookFeeBps();
+        if (configuredCeiling != expectedCeiling) {
+            revert CanonicalHookFeeCeilingMismatch(hook, configuredCeiling, expectedCeiling);
+        }
     }
 
     function _validateActivationToken(GovernanceInitialization calldata initialization) private view {

@@ -41,10 +41,29 @@ import {
 
 contract LotteryHookProbe {
     address public diamond;
+    address public activationToken;
+    address public weth;
+    address public poolManager;
+    int24 public canonicalTickSpacing;
+    uint256 public initialTokenPerWethWad;
+    uint16 public maxCombinedHookFeeBps;
     HookConfiguration private storedConfiguration;
 
+    function configureBindings(address diamond_, address token_, address weth_) external {
+        diamond = diamond_;
+        activationToken = token_;
+        weth = weth_;
+        poolManager = address(this);
+        canonicalTickSpacing = 60;
+        initialTokenPerWethWad = 10_000 ether;
+        maxCombinedHookFeeBps = 200;
+    }
+
+    function crottoDiamond() external view returns (address) {
+        return diamond;
+    }
+
     function setHookConfiguration(HookConfiguration calldata configuration) external {
-        if (diamond == address(0)) diamond = msg.sender;
         require(msg.sender == diamond);
         storedConfiguration = configuration;
     }
@@ -166,6 +185,7 @@ contract LotteryTicketingTest is Test {
         address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 2);
         RewardNFT rewardNft = new RewardNFT(predictedDiamond, 10_000);
         LotteryActivationTokenProbe activationToken = new LotteryActivationTokenProbe(predictedDiamond, address(hook));
+        hook.configureBindings(predictedDiamond, address(activationToken), address(weth));
 
         GovernanceInitialization memory initialization = _initialization(address(rewardNft), address(activationToken));
         diamond = new CrottoDiamond(

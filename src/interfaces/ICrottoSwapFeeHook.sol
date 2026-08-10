@@ -44,6 +44,12 @@ interface ICrottoSwapFeeHook {
 
     function weth() external view returns (address);
 
+    function canonicalTickSpacing() external view returns (int24);
+
+    function initialTokenPerWethWad() external view returns (uint256);
+
+    function maxCombinedHookFeeBps() external view returns (uint16);
+
     function canonicalPoolKey() external view returns (PoolKey memory);
 
     function canonicalPoolId() external view returns (PoolId);
@@ -51,6 +57,8 @@ interface ICrottoSwapFeeHook {
     function hookConfiguration() external view returns (HookConfiguration memory);
 
     function pendingPermanentLiquidity(Currency currency) external view returns (uint256);
+
+    function totalPendingPermanentLiquidity(Currency currency) external view returns (uint256);
 
     function lockedLiquidity() external view returns (uint128);
 
