@@ -193,6 +193,19 @@ contract DiamondStorageAndGuardTest is Test {
                 assertNotEq(slots[i], slots[j], "storage namespaces must not collide");
             }
         }
+
+        assertEq(slots[1], _erc7201("crotto.storage.Governance"));
+        assertEq(slots[2], _erc7201("crotto.storage.Lottery"));
+        assertEq(slots[3], _erc7201("crotto.storage.Rewards"));
+        assertEq(slots[4], _erc7201("crotto.storage.Vault"));
+        assertEq(slots[5], _erc7201("crotto.storage.Treasury"));
+        assertEq(slots[6], _erc7201("crotto.storage.POL"));
+        assertEq(slots[7], _erc7201("crotto.storage.Guard"));
+        assertEq(slots[8], _erc7201("crotto.storage.Buyback"));
+    }
+
+    function _erc7201(string memory namespace) private pure returns (bytes32) {
+        return keccak256(abi.encode(uint256(keccak256(bytes(namespace))) - 1)) & ~bytes32(uint256(0xff));
     }
 
     function test_ProtocolStorageWritesRemainIsolatedFromDiamondOwnership() public {
