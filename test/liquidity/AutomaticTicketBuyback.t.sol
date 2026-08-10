@@ -25,10 +25,8 @@ import {POLInitializationFacet} from "../../src/diamond/facets/POLInitialization
 import {RewardAccountingFacet} from "../../src/diamond/facets/RewardAccountingFacet.sol";
 import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondInit.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
-import {IAutomaticTicketBuyback} from "../../src/interfaces/IAutomaticTicketBuyback.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
-import {ICrottoSwapFeeHook} from "../../src/interfaces/ICrottoSwapFeeHook.sol";
 import {IPOLInitialization} from "../../src/interfaces/IPOLInitialization.sol";
 import {LibAutomaticBuyback} from "../../src/libraries/LibAutomaticBuyback.sol";
 import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
@@ -55,7 +53,31 @@ interface IV4BuybackTestDeployment {
     function swapRouter() external view returns (address);
 }
 
-contract BuybackVrfWrapperProbe {}
+contract BuybackVrfWrapperProbe {
+    uint256 public price = 0.01 ether;
+    uint256 public nextRequestId = 1;
+    address public latestConsumer;
+
+    function calculateRequestPriceNative(uint32, uint32) external view returns (uint256) {
+        return price;
+    }
+
+    function requestRandomWordsInNative(uint32, uint16, uint32, bytes calldata)
+        external
+        payable
+        returns (uint256 requestId)
+    {
+        require(msg.value == price, "wrong price");
+        latestConsumer = msg.sender;
+        requestId = nextRequestId++;
+    }
+
+    function fulfill(uint256 requestId, uint256 randomWord) external {
+        uint256[] memory words = new uint256[](1);
+        words[0] = randomWord;
+        ICrotto(latestConsumer).rawFulfillRandomWords(requestId, words);
+    }
+}
 
 abstract contract AutomaticTicketBuybackFixture is Test {
     using PoolIdLibrary for PoolKey;
@@ -85,6 +107,8 @@ abstract contract AutomaticTicketBuybackFixture is Test {
 
     CrottoDiamond internal diamond;
     ActivationToken internal token;
+    RewardNFT internal rewardNft;
+    BuybackVrfWrapperProbe internal vrfWrapper;
     IERC20 internal weth;
     CrottoSwapFeeHook internal hook;
     IPoolManager internal manager;
@@ -114,7 +138,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         shellCut[0] = _facetCut(address(cutFacet), _artifactSelectors("out/DiamondCutFacet.sol/DiamondCutFacet.json"));
         diamond = new CrottoDiamond(address(this), shellCut, address(0), "");
 
-        RewardNFT rewardNft = new RewardNFT(address(diamond), 10_000);
+        rewardNft = new RewardNFT(address(diamond), _rewardNftMaxSupply());
         address expectedToken = vm.computeCreateAddress(address(this), vm.getNonce(address(this)));
         bytes memory hookConstructorArgs = abi.encode(
             manager, address(diamond), expectedToken, wethAddress, TICK_SPACING, TOKEN_PER_WETH_WAD, uint16(100)
@@ -161,8 +185,9 @@ abstract contract AutomaticTicketBuybackFixture is Test {
             address(settlementFacet), _artifactSelectors("out/BuybackSettlementFacet.sol/BuybackSettlementFacet.json")
         );
 
+        vrfWrapper = new BuybackVrfWrapperProbe();
         GovernanceInitialization memory initialization =
-            _initialization(address(rewardNft), wethAddress, address(new BuybackVrfWrapperProbe()));
+            _initialization(address(rewardNft), wethAddress, address(vrfWrapper));
         IDiamondCut(address(diamond))
             .diamondCut(
                 cuts, address(initializer), abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
@@ -246,20 +271,20 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         fail("buyback event missing");
     }
 
-    function _initialization(address rewardNft, address wethAddress, address vrfWrapper)
-        private
+    function _initialization(address rewardNftAddress, address wethAddress, address vrfWrapperAddress)
+        internal
         view
         returns (GovernanceInitialization memory initialization)
     {
         initialization = GovernanceInitialization({
             immutableConfiguration: ImmutableConfiguration({
                 activationToken: address(token),
-                rewardNFT: rewardNft,
+                rewardNFT: rewardNftAddress,
                 weth: wethAddress,
-                vrfWrapper: vrfWrapper,
+                vrfWrapper: vrfWrapperAddress,
                 uniswapV4PoolManager: address(manager),
                 canonicalHook: address(hook),
-                rewardNFTMaxSupply: 10_000,
+                rewardNFTMaxSupply: _rewardNftMaxSupply(),
                 vaultPrice: 1 ether,
                 requiredBootstrapWeth: REQUIRED_BOOTSTRAP_WETH,
                 initialTokenPerWethWad: TOKEN_PER_WETH_WAD,
@@ -299,7 +324,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
     }
 
     function _facetCut(address facet, bytes4[] memory selectors)
-        private
+        internal
         pure
         returns (IDiamondCut.FacetCut memory cut)
     {
@@ -308,7 +333,11 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         });
     }
 
-    function _artifactSelectors(string memory artifactPath) private view returns (bytes4[] memory selectors) {
+    function _rewardNftMaxSupply() internal pure virtual returns (uint256) {
+        return 10_000;
+    }
+
+    function _artifactSelectors(string memory artifactPath) internal view returns (bytes4[] memory selectors) {
         // Paths are fixed by this test and access is read-only to generated Foundry output.
         // forge-lint: disable-next-line(unsafe-cheatcode)
         string[] memory signatures = vm.parseJsonKeys(vm.readFile(artifactPath), ".methodIdentifiers");
@@ -318,7 +347,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         }
     }
 
-    function _deployArtifact(string memory artifact) private returns (address deployed) {
+    function _deployArtifact(string memory artifact) internal returns (address deployed) {
         bytes memory creationCode = vm.getCode(artifact);
         assembly ("memory-safe") {
             deployed := create(0, add(creationCode, 0x20), mload(creationCode))

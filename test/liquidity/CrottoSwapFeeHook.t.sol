@@ -784,7 +784,7 @@ contract CrottoSwapFeeHookAdversarialTest is Test {
         weth.approve(address(swapRouter), type(uint256).max);
         weth.approve(address(hook), type(uint256).max);
         _mintWeth(REQUIRED_WETH + 10 ether);
-        weth.transfer(address(controller), REQUIRED_WETH);
+        assertTrue(weth.transfer(address(controller), REQUIRED_WETH));
         controller.initialize(
             canonicalKey,
             LibCanonicalPool.sqrtPriceX96(address(token), address(weth), TOKEN_PER_WETH_WAD),
@@ -839,7 +839,7 @@ contract CrottoSwapFeeHookAdversarialTest is Test {
     }
 
     function _assertSwapRevertsWith(bytes4 expectedInnerSelector) private {
-        (bool success, bytes memory revertData) = address(this).call(abi.encodeCall(this.executeTokenToWeth, ())); // forge-lint: disable-line(unsafe-call)
+        (bool success, bytes memory revertData) = address(this).call(abi.encodeCall(this.executeTokenToWeth, ()));
         assertFalse(success, "swap must revert");
         assertEq(bytes4(revertData), CustomRevert.WrappedError.selector, "PoolManager wrapper");
 
