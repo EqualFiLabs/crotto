@@ -321,6 +321,7 @@ contract OperationsReserveTest is Test {
 
     function test_WethCustodyRemainsUnchangedByNativeAccounting() public {
         WETH9 weth = new WETH9();
+        vm.deal(address(this), 1 ether);
         weth.deposit{value: 1 ether}();
         weth.transfer(address(diamond), 1 ether);
         _fund(5 ether);
