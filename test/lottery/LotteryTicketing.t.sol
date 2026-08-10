@@ -22,6 +22,7 @@ import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
 import {LibBuybackStorage} from "../../src/libraries/storage/LibBuybackStorage.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
+import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
 import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
@@ -91,6 +92,10 @@ contract LotteryTicketStateFacet {
     function buybackState() external view returns (uint256 wethReserve, uint256 totalTicketsSold) {
         LibBuybackStorage.Layout storage state = LibBuybackStorage.layout();
         return (state.wethReserve, state.totalTicketsSold);
+    }
+
+    function winnerLiability() external view returns (uint256) {
+        return LibLotteryStorage.layout().totalWinnerPoolWethLiability;
     }
 
     function wethRewardBook() external view returns (RewardBook memory) {
@@ -186,6 +191,7 @@ contract LotteryTicketingTest is Test {
         Round memory storedRound = views.round(1);
         assertEq(storedRound.ticketCount, 2);
         assertEq(storedRound.winnerPoolWeth, 101);
+        assertEq(stateView.winnerLiability(), 101);
         assertEq(views.remainingTickets(1), 8);
         assertEq(views.playerTickets(1, player), 2);
         assertEq(views.ticketBatchCount(1), 1);
@@ -515,7 +521,7 @@ contract LotteryTicketingTest is Test {
     }
 
     function _stateSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](8);
+        selectors = new bytes4[](9);
         selectors[0] = LotteryTicketStateFacet.operationsReserve.selector;
         selectors[1] = LotteryTicketStateFacet.bootstrapWeth.selector;
         selectors[2] = LotteryTicketStateFacet.buybackState.selector;
@@ -524,5 +530,6 @@ contract LotteryTicketingTest is Test {
         selectors[5] = LotteryTicketStateFacet.setTotalActiveWeight.selector;
         selectors[6] = LotteryTicketStateFacet.setPolInitialized.selector;
         selectors[7] = LotteryTicketStateFacet.setWeth.selector;
+        selectors[8] = LotteryTicketStateFacet.winnerLiability.selector;
     }
 }
