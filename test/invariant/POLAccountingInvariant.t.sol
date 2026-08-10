@@ -194,9 +194,11 @@ contract POLAccountingInvariantTest is StdInvariant, Test {
             HookMiner.find(address(this), REQUIRED_FLAGS, type(CrottoSwapFeeHook).creationCode, constructorArgs);
 
         token = new ActivationToken(address(this), address(controller), expectedHook);
+        assertEq(address(token), expectedToken);
         hook = new CrottoSwapFeeHook{salt: salt}(
             v4.manager(), address(controller), address(token), address(weth), TICK_SPACING, TOKEN_PER_WETH_WAD, 100
         );
+        assertEq(address(hook), expectedHook);
         controller.setHook(address(hook), address(token));
         controller.setHookConfiguration(_configuration());
 

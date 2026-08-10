@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 
 contract CrottoSwapFeeHookSurfaceTest is Test {
     error UnexpectedSignature(string signature);
+    error MissingSignature(string signature);
 
     string private constant HOOK_ARTIFACT = "out/CrottoSwapFeeHook.sol/CrottoSwapFeeHook.json";
 
@@ -17,6 +18,9 @@ contract CrottoSwapFeeHookSurfaceTest is Test {
         for (uint256 i; i < signatures.length; ++i) {
             _assertExpected(expected, signatures[i]);
         }
+        for (uint256 i; i < expected.length; ++i) {
+            _assertExposed(signatures, expected[i]);
+        }
     }
 
     function _assertExpected(string[] memory expected, string memory actual) private pure {
@@ -25,6 +29,14 @@ contract CrottoSwapFeeHookSurfaceTest is Test {
             if (keccak256(bytes(expected[i])) == actualHash) return;
         }
         revert UnexpectedSignature(actual);
+    }
+
+    function _assertExposed(string[] memory signatures, string memory expected) private pure {
+        bytes32 expectedHash = keccak256(bytes(expected));
+        for (uint256 i; i < signatures.length; ++i) {
+            if (keccak256(bytes(signatures[i])) == expectedHash) return;
+        }
+        revert MissingSignature(expected);
     }
 
     function _expectedSignatures() private pure returns (string[] memory expected) {
