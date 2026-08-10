@@ -100,13 +100,19 @@ library LibCrottoValidation {
     ///      configuring protocol custody as its own exact-delta Treasury Receiver.
     function validateTreasuryReceiver(address receiver, ImmutableConfiguration memory immutableConfig) internal view {
         _nonzero(receiver, "treasuryReceiver");
-        if (
-            receiver == address(this) || receiver == immutableConfig.activationToken
-                || receiver == immutableConfig.rewardNFT || receiver == immutableConfig.weth
-                || receiver == immutableConfig.vrfWrapper || receiver == immutableConfig.uniswapV4PoolManager
-                || receiver == immutableConfig.canonicalHook
-                || LibDiamond.diamondStorage().facetFunctionSelectors[receiver].functionSelectors.length != 0
-        ) revert TreasuryReceiverIsProtocol(receiver);
+        if (isProtocolAddress(receiver, immutableConfig)) revert TreasuryReceiverIsProtocol(receiver);
+    }
+
+    function isProtocolAddress(address candidate, ImmutableConfiguration memory immutableConfig)
+        internal
+        view
+        returns (bool)
+    {
+        return candidate == address(this) || candidate == immutableConfig.activationToken
+            || candidate == immutableConfig.rewardNFT || candidate == immutableConfig.weth
+            || candidate == immutableConfig.vrfWrapper || candidate == immutableConfig.uniswapV4PoolManager
+            || candidate == immutableConfig.canonicalHook
+            || LibDiamond.diamondStorage().facetFunctionSelectors[candidate].functionSelectors.length != 0;
     }
 
     function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {

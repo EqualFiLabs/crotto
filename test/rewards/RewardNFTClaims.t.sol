@@ -256,6 +256,18 @@ contract RewardNFTClaimsTest is Test {
         rewards.claimNFTTokenReward(tokenId, address(0));
     }
 
+    function test_RevertWhen_ClaimReceiverIsProtocolCustody() public {
+        uint256 tokenId = _mintAndActivate(alice);
+        _fundRewards(1 ether, 0);
+
+        vm.expectRevert(abi.encodeWithSelector(RewardClaimsFacet.InvalidRewardReceiver.selector, address(diamond)));
+        vm.prank(alice);
+        rewards.claimNFTWethReward(tokenId, address(diamond));
+
+        (uint256 pendingWeth,) = rewards.pendingNFTRewards(tokenId);
+        assertEq(pendingWeth, 1 ether);
+    }
+
     function test_RevertWhen_UntrustedCallerInvokesTransferCallback() public {
         vm.expectRevert(
             abi.encodeWithSelector(

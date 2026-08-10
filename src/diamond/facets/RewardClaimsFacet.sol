@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {ICrottoRewards} from "../../interfaces/ICrottoRewards.sol";
 import {IRewardNFT} from "../../interfaces/IRewardNFT.sol";
 import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
+import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibRewardAccounting} from "../../libraries/LibRewardAccounting.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
@@ -38,8 +39,11 @@ contract RewardClaimsFacet is CrottoFacet {
     }
 
     function _validateClaim(uint256 tokenId, address receiver) private view {
-        if (receiver == address(0)) revert InvalidRewardReceiver(receiver);
-        IRewardNFT rewardNft = IRewardNFT(LibGovernanceStorage.layout().immutableConfiguration.rewardNFT);
+        LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
+        if (
+            receiver == address(0) || LibCrottoValidation.isProtocolAddress(receiver, governance.immutableConfiguration)
+        ) revert InvalidRewardReceiver(receiver);
+        IRewardNFT rewardNft = IRewardNFT(governance.immutableConfiguration.rewardNFT);
         address owner = rewardNft.ownerOf(tokenId);
         if (owner != msg.sender) revert NotRewardNFTOwner(tokenId, msg.sender, owner);
     }
