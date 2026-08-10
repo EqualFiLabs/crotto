@@ -14,6 +14,7 @@ import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {LibCrottoGuard} from "../../src/libraries/LibCrottoGuard.sol";
+import {LibBuybackStorage} from "../../src/libraries/storage/LibBuybackStorage.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
@@ -80,18 +81,20 @@ contract StorageHarnessFacet {
         LibVaultStorage.layout().tokenBacking = seed + 4;
         LibTreasuryStorage.layout().operationsReserveEth = seed + 5;
         LibPOLStorage.layout().bootstrapWeth = seed + 6;
+        LibBuybackStorage.layout().wethReserve = seed + 7;
     }
 
-    function sentinels() external view returns (uint256[6] memory values) {
+    function sentinels() external view returns (uint256[7] memory values) {
         values[0] = LibGovernanceStorage.layout().pausedActions;
         values[1] = LibLotteryStorage.layout().currentRoundId;
         values[2] = LibRewardsStorage.layout().totalActiveWeight;
         values[3] = LibVaultStorage.layout().tokenBacking;
         values[4] = LibTreasuryStorage.layout().operationsReserveEth;
         values[5] = LibPOLStorage.layout().bootstrapWeth;
+        values[6] = LibBuybackStorage.layout().wethReserve;
     }
 
-    function storageSlots() external pure returns (bytes32[8] memory slots) {
+    function storageSlots() external pure returns (bytes32[9] memory slots) {
         slots[0] = LibDiamond.diamondStorageSlot();
         slots[1] = LibGovernanceStorage.storageSlot();
         slots[2] = LibLotteryStorage.storageSlot();
@@ -100,6 +103,7 @@ contract StorageHarnessFacet {
         slots[5] = LibTreasuryStorage.storageSlot();
         slots[6] = LibPOLStorage.storageSlot();
         slots[7] = LibCrottoGuard.storageSlot();
+        slots[8] = LibBuybackStorage.storageSlot();
     }
 }
 
@@ -182,18 +186,31 @@ contract DiamondStorageAndGuardTest is Test {
     }
 
     function test_ProtocolStorageNamespacesAreUniqueAndAligned() public view {
-        bytes32[8] memory slots = StorageHarnessFacet(address(diamond)).storageSlots();
+        bytes32[9] memory slots = StorageHarnessFacet(address(diamond)).storageSlots();
         for (uint256 i; i < slots.length; ++i) {
             assertEq(uint256(slots[i]) & 0xff, 0, "ERC-7201 slot must be 256-byte aligned");
             for (uint256 j = i + 1; j < slots.length; ++j) {
                 assertNotEq(slots[i], slots[j], "storage namespaces must not collide");
             }
         }
+
+        assertEq(slots[1], _erc7201("crotto.storage.Governance"));
+        assertEq(slots[2], _erc7201("crotto.storage.Lottery"));
+        assertEq(slots[3], _erc7201("crotto.storage.Rewards"));
+        assertEq(slots[4], _erc7201("crotto.storage.Vault"));
+        assertEq(slots[5], _erc7201("crotto.storage.Treasury"));
+        assertEq(slots[6], _erc7201("crotto.storage.POL"));
+        assertEq(slots[7], _erc7201("crotto.storage.Guard"));
+        assertEq(slots[8], _erc7201("crotto.storage.Buyback"));
+    }
+
+    function _erc7201(string memory namespace) private pure returns (bytes32) {
+        return keccak256(abi.encode(uint256(keccak256(bytes(namespace))) - 1)) & ~bytes32(uint256(0xff));
     }
 
     function test_ProtocolStorageWritesRemainIsolatedFromDiamondOwnership() public {
         StorageHarnessFacet(address(diamond)).writeSentinels(100);
-        uint256[6] memory values = StorageHarnessFacet(address(diamond)).sentinels();
+        uint256[7] memory values = StorageHarnessFacet(address(diamond)).sentinels();
         for (uint256 i; i < values.length; ++i) {
             assertEq(values[i], 101 + i);
         }

@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {Test} from "forge-std/Test.sol";
+import {WETH9} from "@chainlink/contracts/src/v0.8/vendor/canonical-weth/WETH9.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC721Metadata} from "@openzeppelin/contracts/token/ERC721/extensions/IERC721Metadata.sol";
 import {IERC165} from "@openzeppelin/contracts/utils/introspection/IERC165.sol";
@@ -28,6 +29,7 @@ import {
     GovernanceInitialization,
     HookConfiguration,
     ImmutableConfiguration,
+    Round,
     RoundConfiguration
 } from "../../src/types/CrottoTypes.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
@@ -130,6 +132,14 @@ contract GovernanceStateProbeFacet {
         return LibGovernanceStorage.layout().hookConfiguration;
     }
 
+    function currentRoundId() external view returns (uint256) {
+        return LibLotteryStorage.layout().currentRoundId;
+    }
+
+    function storedRound(uint256 roundId) external view returns (Round memory) {
+        return LibLotteryStorage.layout().rounds[roundId];
+    }
+
     function seedHistoricalRound(uint256 roundId, RoundConfiguration calldata configuration) external {
         LibLotteryStorage.layout().rounds[roundId].config = configuration;
     }
@@ -209,6 +219,7 @@ contract DiamondGovernanceTest is Test {
     address private stranger = makeAddr("stranger");
 
     CrottoTimelock private timelock;
+    WETH9 private weth;
     GovernedHookProbe private hook;
     RewardNFT private rewardNft;
     ActivationToken private activationToken;
@@ -227,6 +238,7 @@ contract DiamondGovernanceTest is Test {
         executors[0] = address(0);
         timelock = new CrottoTimelock(proposers, executors, address(0));
 
+        weth = new WETH9();
         hook = new GovernedHookProbe();
         DiamondCutFacet cutFacet = new DiamondCutFacet();
         DiamondLoupeFacet loupeFacet = new DiamondLoupeFacet();
@@ -269,6 +281,11 @@ contract DiamondGovernanceTest is Test {
         assertEq(activationToken.crottoDiamond(), address(diamond));
         assertEq(activationToken.canonicalHook(), address(hook));
         assertEq(stateProbe.roundConfiguration().ticketTarget, 100);
+        assertEq(stateProbe.currentRoundId(), 1);
+        Round memory firstRound = stateProbe.storedRound(1);
+        assertEq(uint8(firstRound.status), 0);
+        assertEq(firstRound.config.ticketTarget, 100);
+        assertEq(firstRound.ticketCount, 0);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 1);
         assertEq(activation.costs[0], 100 ether);
@@ -290,6 +307,24 @@ contract DiamondGovernanceTest is Test {
         initialization.immutableConfiguration.canonicalHook = stranger;
 
         vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.CanonicalHookHasNoCode.selector, stranger));
+        new CrottoDiamond(
+            address(timelock),
+            initialCut,
+            address(initializer),
+            abi.encodeCall(CrottoDiamondInit.initializeGovernance, (initialization))
+        );
+    }
+
+    function test_RevertWhen_ImmutableWethHasNoCode() public {
+        (IDiamondCut.FacetCut[] memory initialCut, CrottoDiamondInit initializer) = _governanceDeploymentParts();
+
+        address predictedDiamond = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        RewardNFT matchingRewardNft = new RewardNFT(predictedDiamond, 10_000);
+        GovernanceInitialization memory initialization = _validInitialization();
+        initialization.immutableConfiguration.rewardNFT = address(matchingRewardNft);
+        initialization.immutableConfiguration.weth = stranger;
+
+        vm.expectRevert(abi.encodeWithSelector(CrottoDiamondInit.WethHasNoCode.selector, stranger));
         new CrottoDiamond(
             address(timelock),
             initialCut,
@@ -475,6 +510,8 @@ contract DiamondGovernanceTest is Test {
 
         RoundConfiguration memory nextRound = originalRound;
         nextRound.ticketTarget = 200;
+        nextRound.treasuryShareBps = 1_500;
+        nextRound.buybackShareBps = 500;
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setRoundConfiguration, (nextRound)));
 
         ActivationConfiguration memory nextActivation = _validActivationConfiguration();
@@ -492,6 +529,11 @@ contract DiamondGovernanceTest is Test {
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setGuardian, (nextGuardian)));
 
         assertEq(stateProbe.roundConfiguration().ticketTarget, 200);
+        assertEq(stateProbe.roundConfiguration().treasuryShareBps, 1_500);
+        assertEq(stateProbe.roundConfiguration().buybackShareBps, 500);
+        assertEq(stateProbe.storedRound(1).config.ticketTarget, 100);
+        assertEq(stateProbe.storedRound(1).config.treasuryShareBps, 1_000);
+        assertEq(stateProbe.storedRound(1).config.buybackShareBps, 1_000);
         assertEq(stateProbe.historicalRoundConfiguration(7).ticketTarget, 100);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 2);
@@ -563,7 +605,25 @@ contract DiamondGovernanceTest is Test {
         invalidRound.ticketOperationsFee = 0.07 ether;
         vm.prank(address(timelock));
         vm.expectRevert(
-            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 4 ether, 40 ether)
+            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 3 ether, 30 ether)
+        );
+        governance.setRoundConfiguration(invalidRound);
+
+        invalidRound = stateProbe.roundConfiguration();
+        invalidRound.ticketTarget = 1;
+        invalidRound.ticketPrice = type(uint256).max - 2;
+        invalidRound.ticketOperationsFee = 3;
+        invalidRound.maxVrfCost = 1;
+        invalidRound.requestCallerReward = 1;
+        invalidRound.finalizationCallerReward = 1;
+        vm.prank(address(timelock));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.TicketPaymentCapacityExceeded.selector,
+                invalidRound.ticketPrice,
+                invalidRound.ticketOperationsFee,
+                invalidRound.ticketTarget
+            )
         );
         governance.setRoundConfiguration(invalidRound);
 
@@ -760,13 +820,13 @@ contract DiamondGovernanceTest is Test {
             immutableConfiguration: ImmutableConfiguration({
                 activationToken: address(activationToken),
                 rewardNFT: address(rewardNft),
-                weth: address(0x1003),
+                weth: address(weth),
                 vrfWrapper: address(0x1004),
                 uniswapV4PoolManager: address(0x1005),
                 canonicalHook: address(hook),
                 rewardNFTMaxSupply: 10_000,
                 vaultPrice: 1_000 ether,
-                requiredBootstrapWeth: 40 ether,
+                requiredBootstrapWeth: 30 ether,
                 initialTokenPerWethWad: 10_000 ether,
                 maxCombinedHookFeeBps: 200,
                 canonicalTickSpacing: 60
@@ -807,8 +867,9 @@ contract DiamondGovernanceTest is Test {
             requestCallerReward: 0.1 ether,
             finalizationCallerReward: 0.1 ether,
             winnerShareBps: 5_000,
-            nftShareBps: 4_000,
-            treasuryShareBps: 1_000
+            nftShareBps: 3_000,
+            treasuryShareBps: 1_000,
+            buybackShareBps: 1_000
         });
     }
 
@@ -869,7 +930,7 @@ contract DiamondGovernanceTest is Test {
     }
 
     function _stateProbeSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](9);
+        selectors = new bytes4[](11);
         selectors[0] = GovernanceStateProbeFacet.initialized.selector;
         selectors[1] = GovernanceStateProbeFacet.immutableConfiguration.selector;
         selectors[2] = GovernanceStateProbeFacet.roundConfiguration.selector;
@@ -879,6 +940,8 @@ contract DiamondGovernanceTest is Test {
         selectors[6] = GovernanceStateProbeFacet.historicalRoundConfiguration.selector;
         selectors[7] = GovernanceStateProbeFacet.seedStoredWeight.selector;
         selectors[8] = GovernanceStateProbeFacet.storedWeight.selector;
+        selectors[9] = GovernanceStateProbeFacet.currentRoundId.selector;
+        selectors[10] = GovernanceStateProbeFacet.storedRound.selector;
     }
 
     function _pauseProbeSelectors() private pure returns (bytes4[] memory selectors) {

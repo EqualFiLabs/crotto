@@ -8,7 +8,8 @@ library CrottoConstants {
     uint256 internal constant GENESIS_TREASURY_SUPPLY = 10_000_000 ether;
 
     uint16 internal constant INITIAL_LOTTERY_WINNER_SHARE_BPS = 5_000;
-    uint16 internal constant INITIAL_LOTTERY_NFT_SHARE_BPS = 4_000;
+    uint16 internal constant INITIAL_LOTTERY_NFT_SHARE_BPS = 3_000;
+    uint16 internal constant INITIAL_LOTTERY_BUYBACK_SHARE_BPS = 1_000;
     uint16 internal constant INITIAL_LOTTERY_TREASURY_SHARE_BPS = 1_000;
 
     uint16 internal constant INITIAL_ACTIVATION_BURN_SHARE_BPS = 2_500;

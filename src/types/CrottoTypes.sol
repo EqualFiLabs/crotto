@@ -56,6 +56,7 @@ struct RoundConfiguration {
     uint16 winnerShareBps;
     uint16 nftShareBps;
     uint16 treasuryShareBps;
+    uint16 buybackShareBps;
 }
 
 /// @notice Governed activation economics applied to future tier transitions.

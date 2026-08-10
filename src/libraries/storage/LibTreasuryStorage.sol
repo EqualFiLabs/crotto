@@ -12,6 +12,7 @@ library LibTreasuryStorage {
         uint256 operationsReserveEth;
         uint256 totalCallerCreditsEth;
         mapping(address caller => uint256 amount) callerCreditsEth;
+        mapping(bytes32 creditKey => bool credited) callerRewardCredited;
     }
 
     function layout() internal pure returns (Layout storage state) {

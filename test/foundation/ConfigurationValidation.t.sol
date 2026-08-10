@@ -55,8 +55,33 @@ contract ValidationHarness {
         );
     }
 
+    function validateFourWayAllocation(uint256 first, uint256 second, uint256 third, uint256 fourth) external pure {
+        if (first > type(uint16).max) revert HarnessValueOutOfBounds(first);
+        if (second > type(uint16).max) revert HarnessValueOutOfBounds(second);
+        if (third > type(uint16).max) revert HarnessValueOutOfBounds(third);
+        if (fourth > type(uint16).max) revert HarnessValueOutOfBounds(fourth);
+        LibCrottoValidation.validateAllocation(
+            SafeCast.toUint16(first), SafeCast.toUint16(second), SafeCast.toUint16(third), SafeCast.toUint16(fourth)
+        );
+    }
+
     function validatePauseFlags(uint256 flags) external pure {
         LibCrottoValidation.validatePauseFlags(flags);
+    }
+}
+
+contract RoundConfigurationPackingHarness {
+    RoundConfiguration private configuration;
+
+    function seedLegacyAllocation(uint256 packedAllocation) external {
+        assembly ("memory-safe") {
+            sstore(8, packedAllocation)
+        }
+    }
+
+    function allocation() external view returns (uint16 winner, uint16 nft, uint16 treasury, uint16 buyback) {
+        RoundConfiguration storage stored = configuration;
+        return (stored.winnerShareBps, stored.nftShareBps, stored.treasuryShareBps, stored.buybackShareBps);
     }
 }
 
@@ -68,9 +93,22 @@ contract ConfigurationValidationTest is Test {
     bytes32 private constant VAULT_PRICE_FIELD = "vaultPrice";
 
     ValidationHarness internal harness;
+    RoundConfigurationPackingHarness private packingHarness;
 
     function setUp() public {
         harness = new ValidationHarness();
+        packingHarness = new RoundConfigurationPackingHarness();
+    }
+
+    function test_BuybackShareAppendsWithoutReinterpretingLegacyPackedAllocation() public {
+        uint256 packedLegacyAllocation = uint256(5_000) | (uint256(4_000) << 16) | (uint256(1_000) << 32);
+        packingHarness.seedLegacyAllocation(packedLegacyAllocation);
+
+        (uint16 winner, uint16 nft, uint16 treasury, uint16 buyback) = packingHarness.allocation();
+        assertEq(winner, 5_000);
+        assertEq(nft, 4_000);
+        assertEq(treasury, 1_000);
+        assertEq(buyback, 0);
     }
 
     function test_DefaultConstantsMatchApprovedEconomics() public pure {
@@ -79,7 +117,8 @@ contract ConfigurationValidationTest is Test {
         assertEq(CrottoConstants.GENESIS_TREASURY_SUPPLY, 10_000_000 ether);
 
         assertEq(CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS, 5_000);
-        assertEq(CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS, 4_000);
+        assertEq(CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS, 3_000);
+        assertEq(CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS, 1_000);
         assertEq(CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS, 1_000);
 
         assertEq(CrottoConstants.INITIAL_ACTIVATION_BURN_SHARE_BPS, 2_500);
@@ -101,7 +140,7 @@ contract ConfigurationValidationTest is Test {
     function test_ApprovedConfigurationsValidate() public view {
         harness.validateImmutableConfiguration(_validImmutableConfiguration());
         harness.validateRoundConfiguration(_validRoundConfiguration());
-        harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
+        harness.validateBootstrapReachability(_validRoundConfiguration(), 30 ether);
         harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
         harness.validateTreasuryReceiver(address(0x1007), _validImmutableConfiguration());
@@ -177,6 +216,62 @@ contract ConfigurationValidationTest is Test {
         harness.validateRoundConfiguration(configuration);
     }
 
+    function test_MaximumPlayerRewardLiabilityValidates() public view {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.ticketOperationsFee = 0.11 ether;
+        configuration.playerRewardRate = type(uint256).max / 2;
+
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_MaximumTicketPaymentQuoteValidates() public view {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.ticketOperationsFee = 2;
+        configuration.ticketPrice = type(uint256).max / 2 - 2;
+        configuration.maxVrfCost = 1;
+        configuration.requestCallerReward = 1;
+        configuration.finalizationCallerReward = 1;
+
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_RevertWhen_TicketPaymentQuoteExceedsCapacity() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.ticketOperationsFee = 2;
+        configuration.ticketPrice = type(uint256).max / 2 - 1;
+        configuration.maxVrfCost = 1;
+        configuration.requestCallerReward = 1;
+        configuration.finalizationCallerReward = 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.TicketPaymentCapacityExceeded.selector,
+                configuration.ticketPrice,
+                configuration.ticketOperationsFee,
+                configuration.ticketTarget
+            )
+        );
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_RevertWhen_PlayerRewardLiabilityExceedsCapacity() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.playerRewardRate = type(uint256).max / 2 + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.PlayerRewardLiabilityCapacityExceeded.selector,
+                configuration.playerRewardRate,
+                configuration.ticketTarget
+            )
+        );
+        harness.validateRoundConfiguration(configuration);
+    }
+
     function test_RevertWhen_RoundAllocationDoesNotConserveValue() public {
         RoundConfiguration memory configuration = _validRoundConfiguration();
         configuration.treasuryShareBps = 999;
@@ -201,9 +296,18 @@ contract ConfigurationValidationTest is Test {
         RoundConfiguration memory configuration = _validRoundConfiguration();
 
         vm.expectRevert(
-            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 40 ether, 41 ether)
+            abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 30 ether, 31 ether)
         );
-        harness.validateBootstrapReachability(configuration, 41 ether);
+        harness.validateBootstrapReachability(configuration, 31 ether);
+    }
+
+    function test_RevertWhen_PerPurchaseRoundingPreventsBootstrapReachability() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketPrice = 2;
+        configuration.ticketTarget = 2;
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 0, 1));
+        harness.validateBootstrapReachability(configuration, 1);
     }
 
     function test_RevertWhen_ActivationCostsAreNotIncreasing() public {
@@ -267,6 +371,18 @@ contract ConfigurationValidationTest is Test {
         harness.validateAllocation(first, second, third);
     }
 
+    function testFuzz_ConservedFourWayAllocationAlwaysValidates(uint256 first, uint256 second, uint256 third)
+        public
+        view
+    {
+        first = bound(first, 0, CrottoConstants.BPS);
+        second = bound(second, 0, CrottoConstants.BPS - first);
+        third = bound(third, 0, CrottoConstants.BPS - first - second);
+        uint256 fourth = CrottoConstants.BPS - first - second - third;
+
+        harness.validateFourWayAllocation(first, second, third, fourth);
+    }
+
     function _validImmutableConfiguration() private pure returns (ImmutableConfiguration memory configuration) {
         configuration = ImmutableConfiguration({
             activationToken: address(0x1001),
@@ -277,7 +393,7 @@ contract ConfigurationValidationTest is Test {
             canonicalHook: address(0x1006),
             rewardNFTMaxSupply: 10_000,
             vaultPrice: 1_000 ether,
-            requiredBootstrapWeth: 40 ether,
+            requiredBootstrapWeth: 30 ether,
             initialTokenPerWethWad: 10_000 ether,
             maxCombinedHookFeeBps: 200,
             canonicalTickSpacing: 60
@@ -296,7 +412,8 @@ contract ConfigurationValidationTest is Test {
             finalizationCallerReward: 0.01 ether,
             winnerShareBps: CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS,
             nftShareBps: CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS,
-            treasuryShareBps: CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS
+            treasuryShareBps: CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS,
+            buybackShareBps: CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS
         });
     }
 

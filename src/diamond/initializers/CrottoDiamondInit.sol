@@ -13,6 +13,7 @@ import {IActivationToken} from "../../interfaces/IActivationToken.sol";
 import {IRewardNFT} from "../../interfaces/IRewardNFT.sol";
 import {ICrottoSwapFeeHook} from "../../interfaces/ICrottoSwapFeeHook.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
+import {LibLottery} from "../../libraries/LibLottery.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {GovernanceInitialization} from "../../types/CrottoTypes.sol";
 import {LibDiamond} from "../libraries/LibDiamond.sol";
@@ -25,6 +26,7 @@ contract CrottoDiamondInit {
     error RewardNFTDiamondMismatch(address rewardNft, address configuredDiamond, address expectedDiamond);
     error RewardNFTMaxSupplyMismatch(address rewardNft, uint256 configuredMaxSupply, uint256 actualMaxSupply);
     error ActivationTokenHasNoCode(address token);
+    error WethHasNoCode(address weth);
     error ActivationTokenDiamondMismatch(address token, address configuredDiamond, address expectedDiamond);
     error ActivationTokenHookMismatch(address token, address configuredHook, address expectedHook);
 
@@ -52,6 +54,9 @@ contract CrottoDiamondInit {
             initialization.treasuryReceiver, initialization.immutableConfiguration
         );
 
+        address weth = initialization.immutableConfiguration.weth;
+        if (weth.code.length == 0) revert WethHasNoCode(weth);
+
         _validateRewardNft(initialization);
 
         address hook = initialization.immutableConfiguration.canonicalHook;
@@ -67,6 +72,8 @@ contract CrottoDiamondInit {
         state.guardian = initialization.guardian;
         state.activationConfigurationVersion = 1;
         state.immutableConfigurationInitialized = true;
+
+        LibLottery.initializeFirstRound(initialization.roundConfiguration);
 
         ICrottoSwapFeeHook(hook).setHookConfiguration(initialization.hookConfiguration);
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.33;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CrottoConstants} from "./CrottoConstants.sol";
 import {LibDiamond} from "../diamond/libraries/LibDiamond.sol";
 import {
@@ -22,6 +23,8 @@ library LibCrottoValidation {
     error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
+    error PlayerRewardLiabilityCapacityExceeded(uint256 rewardRate, uint256 ticketTarget);
+    error TicketPaymentCapacityExceeded(uint256 ticketPrice, uint256 operationsFee, uint256 ticketTarget);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
 
@@ -57,7 +60,18 @@ library LibCrottoValidation {
         _positive(config.vrfRetryDelay, "vrfRetryDelay");
         _positive(config.requestCallerReward, "requestCallerReward");
         _positive(config.finalizationCallerReward, "finalizationCallerReward");
-        validateAllocation(config.winnerShareBps, config.nftShareBps, config.treasuryShareBps);
+        validateAllocation(config.winnerShareBps, config.nftShareBps, config.treasuryShareBps, config.buybackShareBps);
+
+        if (config.playerRewardRate > type(uint256).max / config.ticketTarget) {
+            revert PlayerRewardLiabilityCapacityExceeded(config.playerRewardRate, config.ticketTarget);
+        }
+        if (config.ticketPrice > type(uint256).max - config.ticketOperationsFee) {
+            revert TicketPaymentCapacityExceeded(config.ticketPrice, config.ticketOperationsFee, config.ticketTarget);
+        }
+        uint256 paymentPerTicket = config.ticketPrice + config.ticketOperationsFee;
+        if (paymentPerTicket > type(uint256).max / config.ticketTarget) {
+            revert TicketPaymentCapacityExceeded(config.ticketPrice, config.ticketOperationsFee, config.ticketTarget);
+        }
 
         uint256 available = config.ticketOperationsFee * config.ticketTarget;
         uint256 required = config.maxVrfCost + config.requestCallerReward + config.finalizationCallerReward;
@@ -69,8 +83,8 @@ library LibCrottoValidation {
         pure
     {
         _positive(requiredBootstrapWeth, "requiredBootstrapWeth");
-        uint256 nftAllocationAtSellout =
-            config.ticketPrice * config.ticketTarget * config.nftShareBps / CrottoConstants.BPS;
+        uint256 nftAllocationPerTicket = Math.mulDiv(config.ticketPrice, config.nftShareBps, CrottoConstants.BPS);
+        uint256 nftAllocationAtSellout = nftAllocationPerTicket * config.ticketTarget;
         if (nftAllocationAtSellout < requiredBootstrapWeth) {
             revert BootstrapThresholdUnreachable(nftAllocationAtSellout, requiredBootstrapWeth);
         }
@@ -122,6 +136,16 @@ library LibCrottoValidation {
 
     function validateAllocation(uint16 firstShareBps, uint16 secondShareBps, uint16 thirdShareBps) internal pure {
         uint256 totalBps = uint256(firstShareBps) + secondShareBps + thirdShareBps;
+        if (totalBps != CrottoConstants.BPS) revert InvalidAllocation(totalBps);
+    }
+
+    function validateAllocation(
+        uint16 firstShareBps,
+        uint16 secondShareBps,
+        uint16 thirdShareBps,
+        uint16 fourthShareBps
+    ) internal pure {
+        uint256 totalBps = uint256(firstShareBps) + secondShareBps + thirdShareBps + fourthShareBps;
         if (totalBps != CrottoConstants.BPS) revert InvalidAllocation(totalBps);
     }
 
