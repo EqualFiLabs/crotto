@@ -68,6 +68,26 @@ library LibRewardAccounting {
         }
     }
 
+    function consumeWethClaim(uint256 tokenId) internal returns (uint256 amount) {
+        LibRewardsStorage.Layout storage state = LibRewardsStorage.layout();
+        settle(tokenId);
+        NFTRewardPosition storage position = state.positions[tokenId];
+        amount = position.claimableWeth;
+        if (amount == 0) return 0;
+        position.claimableWeth = 0;
+        state.wethBook.totalClaimable -= amount;
+    }
+
+    function consumeTokenClaim(uint256 tokenId) internal returns (uint256 amount) {
+        LibRewardsStorage.Layout storage state = LibRewardsStorage.layout();
+        settle(tokenId);
+        NFTRewardPosition storage position = state.positions[tokenId];
+        amount = position.claimableToken;
+        if (amount == 0) return 0;
+        position.claimableToken = 0;
+        state.tokenBook.totalClaimable -= amount;
+    }
+
     /// @dev Settles the old position, checkpoints current indexes, then changes its eligibility.
     function setPositionWeight(uint256 tokenId, uint8 tier, uint256 newWeight)
         internal
