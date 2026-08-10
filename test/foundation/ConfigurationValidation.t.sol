@@ -70,6 +70,21 @@ contract ValidationHarness {
     }
 }
 
+contract RoundConfigurationPackingHarness {
+    RoundConfiguration private configuration;
+
+    function seedLegacyAllocation(uint256 packedAllocation) external {
+        assembly ("memory-safe") {
+            sstore(8, packedAllocation)
+        }
+    }
+
+    function allocation() external view returns (uint16 winner, uint16 nft, uint16 treasury, uint16 buyback) {
+        RoundConfiguration storage stored = configuration;
+        return (stored.winnerShareBps, stored.nftShareBps, stored.treasuryShareBps, stored.buybackShareBps);
+    }
+}
+
 contract ConfigurationValidationTest is Test {
     bytes32 private constant CANONICAL_HOOK_FIELD = "canonicalHook";
     bytes32 private constant PLAYER_REWARD_RATE_FIELD = "playerRewardRate";
@@ -78,9 +93,22 @@ contract ConfigurationValidationTest is Test {
     bytes32 private constant VAULT_PRICE_FIELD = "vaultPrice";
 
     ValidationHarness internal harness;
+    RoundConfigurationPackingHarness private packingHarness;
 
     function setUp() public {
         harness = new ValidationHarness();
+        packingHarness = new RoundConfigurationPackingHarness();
+    }
+
+    function test_BuybackShareAppendsWithoutReinterpretingLegacyPackedAllocation() public {
+        uint256 packedLegacyAllocation = uint256(5_000) | (uint256(4_000) << 16) | (uint256(1_000) << 32);
+        packingHarness.seedLegacyAllocation(packedLegacyAllocation);
+
+        (uint16 winner, uint16 nft, uint16 treasury, uint16 buyback) = packingHarness.allocation();
+        assertEq(winner, 5_000);
+        assertEq(nft, 4_000);
+        assertEq(treasury, 1_000);
+        assertEq(buyback, 0);
     }
 
     function test_DefaultConstantsMatchApprovedEconomics() public pure {
@@ -188,6 +216,30 @@ contract ConfigurationValidationTest is Test {
         harness.validateRoundConfiguration(configuration);
     }
 
+    function test_MaximumPlayerRewardLiabilityValidates() public view {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.ticketOperationsFee = 0.11 ether;
+        configuration.playerRewardRate = type(uint256).max / 2;
+
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_RevertWhen_PlayerRewardLiabilityExceedsCapacity() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 2;
+        configuration.playerRewardRate = type(uint256).max / 2 + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.PlayerRewardLiabilityCapacityExceeded.selector,
+                configuration.playerRewardRate,
+                configuration.ticketTarget
+            )
+        );
+        harness.validateRoundConfiguration(configuration);
+    }
+
     function test_RevertWhen_RoundAllocationDoesNotConserveValue() public {
         RoundConfiguration memory configuration = _validRoundConfiguration();
         configuration.treasuryShareBps = 999;
@@ -215,6 +267,15 @@ contract ConfigurationValidationTest is Test {
             abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 30 ether, 31 ether)
         );
         harness.validateBootstrapReachability(configuration, 31 ether);
+    }
+
+    function test_RevertWhen_PerPurchaseRoundingPreventsBootstrapReachability() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketPrice = 2;
+        configuration.ticketTarget = 2;
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.BootstrapThresholdUnreachable.selector, 0, 1));
+        harness.validateBootstrapReachability(configuration, 1);
     }
 
     function test_RevertWhen_ActivationCostsAreNotIncreasing() public {
@@ -319,8 +380,8 @@ contract ConfigurationValidationTest is Test {
             finalizationCallerReward: 0.01 ether,
             winnerShareBps: CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS,
             nftShareBps: CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS,
-            buybackShareBps: CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS,
-            treasuryShareBps: CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS
+            treasuryShareBps: CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS,
+            buybackShareBps: CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS
         });
     }
 

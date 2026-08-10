@@ -823,8 +823,8 @@ contract DiamondGovernanceTest is Test {
             finalizationCallerReward: 0.1 ether,
             winnerShareBps: 5_000,
             nftShareBps: 3_000,
-            buybackShareBps: 1_000,
-            treasuryShareBps: 1_000
+            treasuryShareBps: 1_000,
+            buybackShareBps: 1_000
         });
     }
 

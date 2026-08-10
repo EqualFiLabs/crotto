@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.33;
 
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {CrottoConstants} from "./CrottoConstants.sol";
 import {LibDiamond} from "../diamond/libraries/LibDiamond.sol";
 import {
@@ -22,6 +23,7 @@ library LibCrottoValidation {
     error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
+    error PlayerRewardLiabilityCapacityExceeded(uint256 rewardRate, uint256 ticketTarget);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
 
@@ -59,6 +61,10 @@ library LibCrottoValidation {
         _positive(config.finalizationCallerReward, "finalizationCallerReward");
         validateAllocation(config.winnerShareBps, config.nftShareBps, config.buybackShareBps, config.treasuryShareBps);
 
+        if (config.playerRewardRate > type(uint256).max / config.ticketTarget) {
+            revert PlayerRewardLiabilityCapacityExceeded(config.playerRewardRate, config.ticketTarget);
+        }
+
         uint256 available = config.ticketOperationsFee * config.ticketTarget;
         uint256 required = config.maxVrfCost + config.requestCallerReward + config.finalizationCallerReward;
         if (available < required) revert InsufficientRoundOperationsFunding(available, required);
@@ -69,8 +75,8 @@ library LibCrottoValidation {
         pure
     {
         _positive(requiredBootstrapWeth, "requiredBootstrapWeth");
-        uint256 nftAllocationAtSellout =
-            config.ticketPrice * config.ticketTarget * config.nftShareBps / CrottoConstants.BPS;
+        uint256 nftAllocationPerTicket = Math.mulDiv(config.ticketPrice, config.nftShareBps, CrottoConstants.BPS);
+        uint256 nftAllocationAtSellout = nftAllocationPerTicket * config.ticketTarget;
         if (nftAllocationAtSellout < requiredBootstrapWeth) {
             revert BootstrapThresholdUnreachable(nftAllocationAtSellout, requiredBootstrapWeth);
         }
