@@ -489,6 +489,8 @@ contract DiamondGovernanceTest is Test {
 
         RoundConfiguration memory nextRound = originalRound;
         nextRound.ticketTarget = 200;
+        nextRound.treasuryShareBps = 1_500;
+        nextRound.buybackShareBps = 500;
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setRoundConfiguration, (nextRound)));
 
         ActivationConfiguration memory nextActivation = _validActivationConfiguration();
@@ -506,7 +508,11 @@ contract DiamondGovernanceTest is Test {
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setGuardian, (nextGuardian)));
 
         assertEq(stateProbe.roundConfiguration().ticketTarget, 200);
+        assertEq(stateProbe.roundConfiguration().treasuryShareBps, 1_500);
+        assertEq(stateProbe.roundConfiguration().buybackShareBps, 500);
         assertEq(stateProbe.storedRound(1).config.ticketTarget, 100);
+        assertEq(stateProbe.storedRound(1).config.treasuryShareBps, 1_000);
+        assertEq(stateProbe.storedRound(1).config.buybackShareBps, 1_000);
         assertEq(stateProbe.historicalRoundConfiguration(7).ticketTarget, 100);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 2);
