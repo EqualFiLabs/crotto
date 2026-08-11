@@ -282,15 +282,36 @@ contract ConfigurationValidationTest is Test {
         harness.validateRoundConfiguration(configuration);
     }
 
-    function test_MaximumTicketPaymentQuoteValidates() public view {
+    function test_LargeTicketPaymentIncludingMaximumBuilderFeeValidates() public view {
         RoundConfiguration memory configuration = _validRoundConfiguration();
         configuration.ticketTarget = 2;
         configuration.ticketOperationsFee = 2;
-        configuration.ticketPrice = type(uint256).max / 2 - 2;
+        configuration.ticketPrice = type(uint256).max / 3;
         configuration.maxVrfCost = 1;
         configuration.requestCallerReward = 1;
         configuration.finalizationCallerReward = 1;
 
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_RevertWhen_MaximumBuilderFeeMakesSelloutPaymentUnrepresentable() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.ticketTarget = 1;
+        configuration.ticketOperationsFee = 3;
+        configuration.ticketPrice = type(uint256).max - 3;
+        configuration.maxVrfCost = 1;
+        configuration.requestCallerReward = 1;
+        configuration.finalizationCallerReward = 1;
+        uint256 builderFee = configuration.ticketPrice / 200;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.BuilderTicketPaymentCapacityExceeded.selector,
+                type(uint256).max,
+                builderFee,
+                configuration.ticketTarget
+            )
+        );
         harness.validateRoundConfiguration(configuration);
     }
 

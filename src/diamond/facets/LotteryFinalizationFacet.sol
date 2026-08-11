@@ -83,7 +83,7 @@ contract LotteryFinalizationFacet is CrottoFacet {
             revert PlayerRewardAlreadyClaimed(roundId, msg.sender);
         }
 
-        amount = lottery.playerTicketCounts[roundId][msg.sender] * finalizedRound.config.playerRewardRate;
+        amount = lottery.rewardTicketCounts[roundId][msg.sender] * finalizedRound.config.playerRewardRate;
         if (amount == 0) revert PlayerRewardUnavailable(roundId, msg.sender);
         lottery.playerRewardClaimed[roundId][msg.sender] = true;
         finalizedRound.unclaimedPlayerRewardLiability -= amount;

@@ -15,11 +15,12 @@ contract EthereumDeploymentToolingTest is Test {
     CrottoDeploymentConfig private configurationReader;
     CrottoScriptBaseHarness private scriptBase;
 
-    string[15] private facetNames = [
+    string[16] private facetNames = [
         "DiamondCutFacet",
         "DiamondLoupeFacet",
         "OwnershipFacet",
         "GovernanceFacet",
+        "BuilderFeesFacet",
         "LotteryTicketFacet",
         "LotteryVRFFacet",
         "LotteryFinalizationFacet",
@@ -95,6 +96,6 @@ contract EthereumDeploymentToolingTest is Test {
             }
         }
 
-        assertEq(seenCount, 72);
+        assertEq(seenCount, 82);
     }
 }

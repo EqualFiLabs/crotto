@@ -30,6 +30,7 @@ contract LotteryRoundViewHarness is LotteryViewFacet {
         state.ticketBatches[1].push(TicketBatch({endExclusive: 4, buyer: address(0xB0B)}));
         state.ticketBatches[1].push(TicketBatch({endExclusive: 11, buyer: player}));
         state.playerTicketCounts[1][player] = 7;
+        state.rewardTicketCounts[1][player] = 7;
         state.playerRewardClaimed[1][player] = true;
     }
 
@@ -95,6 +96,7 @@ contract LotteryRoundViewsTest is Test {
         assertEq(views.remainingTickets(1), 100);
         assertEq(views.ticketBatchCount(1), 0);
         assertEq(views.playerTickets(1, player), 0);
+        assertEq(views.rewardTickets(1, player), 0);
         assertFalse(views.playerRewardClaimed(1, player));
         assertEq(views.playerRewardEntitlement(1, player), 0);
     }
@@ -112,6 +114,7 @@ contract LotteryRoundViewsTest is Test {
         assertEq(second.endExclusive, 11);
         assertEq(second.buyer, player);
         assertEq(views.playerTickets(1, player), 7);
+        assertEq(views.rewardTickets(1, player), 7);
         assertTrue(views.playerRewardClaimed(1, player));
         assertEq(views.playerRewardEntitlement(1, player), 70 ether);
 
@@ -185,17 +188,17 @@ contract LotteryRoundViewsTest is Test {
 
     function _viewHarnessSelectors() private pure returns (bytes4[] memory selectors) {
         bytes4[] memory viewSelectors = _lotteryViewSelectors();
-        selectors = new bytes4[](12);
+        selectors = new bytes4[](13);
         for (uint256 i; i < viewSelectors.length; ++i) {
             selectors[i] = viewSelectors[i];
         }
-        selectors[9] = LotteryRoundViewHarness.initializeRound.selector;
-        selectors[10] = LotteryRoundViewHarness.seedTicketState.selector;
-        selectors[11] = LotteryRoundViewHarness.seedRequest.selector;
+        selectors[10] = LotteryRoundViewHarness.initializeRound.selector;
+        selectors[11] = LotteryRoundViewHarness.seedTicketState.selector;
+        selectors[12] = LotteryRoundViewHarness.seedRequest.selector;
     }
 
     function _lotteryViewSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](9);
+        selectors = new bytes4[](10);
         selectors[0] = LotteryViewFacet.currentRoundId.selector;
         selectors[1] = LotteryViewFacet.round.selector;
         selectors[2] = LotteryViewFacet.remainingTickets.selector;
@@ -203,7 +206,8 @@ contract LotteryRoundViewsTest is Test {
         selectors[4] = LotteryViewFacet.ticketBatch.selector;
         selectors[5] = LotteryViewFacet.playerTickets.selector;
         selectors[6] = LotteryViewFacet.playerRewardClaimed.selector;
-        selectors[7] = LotteryViewFacet.playerRewardEntitlement.selector;
-        selectors[8] = LotteryViewFacet.requestRecord.selector;
+        selectors[7] = LotteryViewFacet.rewardTickets.selector;
+        selectors[8] = LotteryViewFacet.playerRewardEntitlement.selector;
+        selectors[9] = LotteryViewFacet.requestRecord.selector;
     }
 }

@@ -43,6 +43,10 @@ interface ICrotto {
 
     function buyTickets(uint256 quantity) external payable;
 
+    function buyTicketsWithBuilder(uint256 quantity, address builder, uint16 builderFeeBps, bool redirectTicketRewards)
+        external
+        payable;
+
     function fundOperationsReserve() external payable;
 
     function requestRandomness(uint256 roundId) external returns (uint256 requestId);

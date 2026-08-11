@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CrottoTimelock} from "../src/governance/CrottoTimelock.sol";
 import {ICrotto} from "../src/interfaces/ICrotto.sol";
 import {ICrottoGovernance} from "../src/interfaces/ICrottoGovernance.sol";
+import {ICrottoBuilderFees} from "../src/interfaces/ICrottoBuilderFees.sol";
 import {IDiamondCut} from "../src/interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../src/interfaces/diamond/IERC173.sol";
@@ -73,6 +74,8 @@ abstract contract CrottoFinalImmutability is CrottoScriptBase {
             revert FinalSelectorStillInstalled(IERC173.transferOwnership.selector);
         }
         _requireSelector(loupe, ICrotto.buyTickets.selector);
+        _requireSelector(loupe, ICrotto.buyTicketsWithBuilder.selector);
+        _requireSelector(loupe, ICrottoBuilderFees.claimBuilderFees.selector);
         _requireSelector(loupe, ICrotto.finalizeLottery.selector);
         _requireSelector(loupe, ICrottoGovernance.setRoundConfiguration.selector);
         _requireSelector(loupe, IPOLInitialization.initializePOL.selector);

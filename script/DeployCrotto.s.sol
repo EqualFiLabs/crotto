@@ -8,6 +8,7 @@ import {CrottoTimelock} from "../src/governance/CrottoTimelock.sol";
 import {CrottoDiamondInit} from "../src/diamond/initializers/CrottoDiamondInit.sol";
 import {IActivationToken} from "../src/interfaces/IActivationToken.sol";
 import {ICrottoGovernance} from "../src/interfaces/ICrottoGovernance.sol";
+import {ICrottoBuilderFees} from "../src/interfaces/ICrottoBuilderFees.sol";
 import {ICrottoSwapFeeHook} from "../src/interfaces/ICrottoSwapFeeHook.sol";
 import {ICrottoView} from "../src/interfaces/ICrottoView.sol";
 import {IRewardNFT} from "../src/interfaces/IRewardNFT.sol";
@@ -50,10 +51,11 @@ contract DeployCrotto is CrottoScriptBase {
             | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
     );
 
-    string[14] private facetNames = [
+    string[15] private facetNames = [
         "DiamondLoupeFacet",
         "OwnershipFacet",
         "GovernanceFacet",
+        "BuilderFeesFacet",
         "LotteryTicketFacet",
         "LotteryVRFFacet",
         "LotteryFinalizationFacet",
@@ -351,5 +353,10 @@ contract DeployCrotto is CrottoScriptBase {
         if (keccak256(abi.encode(firstRound.config)) != keccak256(abi.encode(configuration.round))) {
             revert UnexpectedDeploymentState("firstRoundConfiguration");
         }
+        ICrottoBuilderFees builderFees = ICrottoBuilderFees(result.diamond);
+        if (
+            builderFees.MAX_BUILDER_FEE_BPS() != CrottoConstants.MAX_BUILDER_FEE_BPS
+                || builderFees.totalBuilderFeeLiability() != 0
+        ) revert UnexpectedDeploymentState("builderFees");
     }
 }

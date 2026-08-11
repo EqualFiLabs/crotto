@@ -42,15 +42,20 @@ contract LotteryViewFacet {
         return LibLotteryStorage.layout().playerTicketCounts[roundId][player];
     }
 
+    function rewardTickets(uint256 roundId, address beneficiary) external view returns (uint256) {
+        _enforceRoundExists(roundId);
+        return LibLotteryStorage.layout().rewardTicketCounts[roundId][beneficiary];
+    }
+
     function playerRewardClaimed(uint256 roundId, address player) external view returns (bool) {
         _enforceRoundExists(roundId);
         return LibLotteryStorage.layout().playerRewardClaimed[roundId][player];
     }
 
-    function playerRewardEntitlement(uint256 roundId, address player) external view returns (uint256) {
+    function playerRewardEntitlement(uint256 roundId, address beneficiary) external view returns (uint256) {
         _enforceRoundExists(roundId);
         LibLotteryStorage.Layout storage state = LibLotteryStorage.layout();
-        return state.playerTicketCounts[roundId][player] * state.rounds[roundId].config.playerRewardRate;
+        return state.rewardTicketCounts[roundId][beneficiary] * state.rounds[roundId].config.playerRewardRate;
     }
 
     function requestRecord(uint256 requestId) external view returns (RequestRecord memory) {
