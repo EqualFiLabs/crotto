@@ -14,6 +14,7 @@ interface ICrotto {
         uint256 endTicketExclusive,
         uint256 ticketPriceWeth,
         uint256 operationsFeeEth,
+        uint256 operationsTreasuryWeth,
         uint256 buybackWeth,
         bool buybackRoutedToBootstrap
     );

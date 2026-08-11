@@ -311,7 +311,8 @@ abstract contract AutomaticTicketBuybackFixture is Test {
                 winnerShareBps: 5_000,
                 nftShareBps: 3_000,
                 treasuryShareBps: 1_000,
-                buybackShareBps: 1_000
+                buybackShareBps: 1_000,
+                operationsReserveCap: 0.5 ether
             }),
             activationConfiguration: ActivationConfiguration({
                 costs: [uint256(1 ether), 2 ether, 3 ether],
@@ -386,8 +387,8 @@ contract AutomaticTicketBuybackTest is AutomaticTicketBuybackFixture {
         assertEq(exactWethDebit, grossBudget);
         assertGe(actualOut, minimumOut);
         assertGe(token.balanceOf(treasury) - treasuryTokenBefore, actualOut);
-        // Base ticket Treasury routing plus the hook's 10% share of the 50 bps WETH input-leg fee.
-        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.8001 ether);
+        // Base routing, 0.02 ether Operations overflow, and the hook's 10% WETH input-fee share.
+        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.8201 ether);
         assertEq(views.round(1).ticketCount, 77);
         assertEq(views.ticketBatchCount(1), 2);
         assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 1 ether);

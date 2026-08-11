@@ -156,7 +156,8 @@ contract LotteryRoundViewsTest is Test {
             winnerShareBps: 5_000,
             nftShareBps: 3_000,
             treasuryShareBps: 1_000,
-            buybackShareBps: 1_000
+            buybackShareBps: 1_000,
+            operationsReserveCap: 1 ether
         });
     }
 

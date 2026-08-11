@@ -356,6 +356,7 @@ contract LotteryRandomnessTest is Test {
         configuration.nftShareBps = 3_000;
         configuration.treasuryShareBps = 1_000;
         configuration.buybackShareBps = 1_000;
+        configuration.operationsReserveCap = 100 ether;
     }
 
     function _facetCut(address facet, bytes4[] memory selectors) private pure returns (IDiamondCut.FacetCut memory) {

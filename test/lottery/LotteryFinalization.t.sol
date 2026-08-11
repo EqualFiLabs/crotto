@@ -207,6 +207,41 @@ contract LotteryFinalizationTest is Test {
         assertEq(views.round(2).ticketCount, 0);
     }
 
+    function test_OperationalSpendingReopensTicketFeeHeadroomAfterRollover() public {
+        _sellOut();
+        _acceptRandomness(1);
+        stateHarness.setNextRoundConfiguration(_configuration(7));
+        finalization.finalizeLottery(1);
+
+        assertEq(operations.operationsReserve(), 0.4 ether);
+        vm.prank(playerA);
+        ticketing.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+
+        assertEq(operations.operationsReserve(), 0.6 ether);
+        assertEq(address(diamond).balance, 1 ether);
+    }
+
+    function test_LowerNextRoundCapPreservesCarriedReserveAndRoutesFullFeeToTreasury() public {
+        _sellOut();
+        _acceptRandomness(1);
+        RoundConfiguration memory nextConfiguration = _configuration(7);
+        nextConfiguration.maxVrfCost = 0.1 ether;
+        nextConfiguration.requestCallerReward = 0.1 ether;
+        nextConfiguration.finalizationCallerReward = 0.1 ether;
+        nextConfiguration.operationsReserveCap = 0.3 ether;
+        stateHarness.setNextRoundConfiguration(nextConfiguration);
+        finalization.finalizeLottery(1);
+
+        assertEq(operations.operationsReserve(), 0.4 ether);
+        uint256 treasuryBefore = weth.balanceOf(treasury);
+        vm.prank(playerA);
+        ticketing.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+
+        assertEq(operations.operationsReserve(), 0.4 ether);
+        assertEq(address(diamond).balance, 0.8 ether);
+        assertEq(weth.balanceOf(treasury) - treasuryBefore, 0.3 ether);
+    }
+
     function testFuzz_BinarySearchResolvesEveryFrozenTicket(uint256 randomWord) public {
         _sellOut();
         _acceptRandomness(randomWord);
@@ -363,6 +398,7 @@ contract LotteryFinalizationTest is Test {
         configuration.nftShareBps = 3_000;
         configuration.treasuryShareBps = 1_000;
         configuration.buybackShareBps = 1_000;
+        configuration.operationsReserveCap = 1 ether;
     }
 
     function _facetCut(address facet, bytes4[] memory selectors) private pure returns (IDiamondCut.FacetCut memory) {

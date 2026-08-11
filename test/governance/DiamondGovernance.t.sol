@@ -595,6 +595,7 @@ contract DiamondGovernanceTest is Test {
         nextRound.ticketTarget = 200;
         nextRound.treasuryShareBps = 1_500;
         nextRound.buybackShareBps = 500;
+        nextRound.operationsReserveCap = 2 ether;
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setRoundConfiguration, (nextRound)));
 
         ActivationConfiguration memory nextActivation = _validActivationConfiguration();
@@ -616,10 +617,13 @@ contract DiamondGovernanceTest is Test {
         assertEq(stateProbe.roundConfiguration().ticketTarget, 200);
         assertEq(stateProbe.roundConfiguration().treasuryShareBps, 1_500);
         assertEq(stateProbe.roundConfiguration().buybackShareBps, 500);
+        assertEq(stateProbe.roundConfiguration().operationsReserveCap, 2 ether);
         assertEq(stateProbe.storedRound(1).config.ticketTarget, 100);
         assertEq(stateProbe.storedRound(1).config.treasuryShareBps, 1_000);
         assertEq(stateProbe.storedRound(1).config.buybackShareBps, 1_000);
+        assertEq(stateProbe.storedRound(1).config.operationsReserveCap, 1 ether);
         assertEq(stateProbe.historicalRoundConfiguration(7).ticketTarget, 100);
+        assertEq(stateProbe.historicalRoundConfiguration(7).operationsReserveCap, 1 ether);
         (uint64 version, ActivationConfiguration memory activation) = stateProbe.activationConfiguration();
         assertEq(version, 2);
         assertEq(activation.destinationWeights[0], 10);
@@ -683,6 +687,18 @@ contract DiamondGovernanceTest is Test {
         vm.prank(address(timelock));
         vm.expectRevert(
             abi.encodeWithSelector(LibCrottoValidation.InsufficientRoundOperationsFunding.selector, 100, 0.7 ether)
+        );
+        governance.setRoundConfiguration(invalidRound);
+
+        invalidRound = stateProbe.roundConfiguration();
+        invalidRound.operationsReserveCap = uint192(0.7 ether - 1);
+        vm.prank(address(timelock));
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.OperationsReserveCapBelowRoundRequirement.selector,
+                invalidRound.operationsReserveCap,
+                0.7 ether
+            )
         );
         governance.setRoundConfiguration(invalidRound);
 
@@ -958,7 +974,8 @@ contract DiamondGovernanceTest is Test {
             winnerShareBps: 5_000,
             nftShareBps: 3_000,
             treasuryShareBps: 1_000,
-            buybackShareBps: 1_000
+            buybackShareBps: 1_000,
+            operationsReserveCap: 1 ether
         });
     }
 

@@ -109,6 +109,27 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         assertEq(views.rewardTickets(1, player), 2);
     }
 
+    function test_BuilderFeeStaysNativeWhileOperationsOverflowRoutesAsTreasuryWeth() public {
+        _buyTickets(50);
+        assertEq(address(diamond).balance, 0.5 ether);
+
+        vm.prank(player);
+        builders.approveBuilder(builder, 50, false);
+        BuilderTicketQuote memory quote =
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, builder, 50, false);
+        uint256 treasuryWethBefore = weth.balanceOf(treasury);
+        uint256 diamondWethBefore = weth.balanceOf(address(diamond));
+
+        vm.prank(player);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, builder, 50, false);
+
+        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.11 ether);
+        assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 0.9 ether);
+        assertEq(address(diamond).balance, 0.505 ether);
+        assertEq(builders.builderCredit(builder), 0.005 ether);
+        assertEq(builders.totalBuilderFeeLiability(), 0.005 ether);
+    }
+
     function test_UnauthorizedRewardRedirectFallsBackWithoutBlockingApprovedFee() public {
         vm.prank(player);
         builders.approveBuilder(builder, 25, false);

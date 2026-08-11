@@ -25,6 +25,7 @@ library LibCrottoValidation {
     error VaultBackingCapacityExceeded(uint256 vaultPrice, uint256 maximumSupply);
     error InvalidHookFeeCeiling(uint256 combinedFeeBps, uint256 maximumFeeBps);
     error InsufficientRoundOperationsFunding(uint256 available, uint256 required);
+    error OperationsReserveCapBelowRoundRequirement(uint256 cap, uint256 required);
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
     error PlayerRewardLiabilityCapacityExceeded(uint256 rewardRate, uint256 ticketTarget);
     error TicketPaymentCapacityExceeded(uint256 ticketPrice, uint256 operationsFee, uint256 ticketTarget);
@@ -100,6 +101,9 @@ library LibCrottoValidation {
         uint256 available = config.ticketOperationsFee * config.ticketTarget;
         uint256 required = config.maxVrfCost + config.requestCallerReward + config.finalizationCallerReward;
         if (available < required) revert InsufficientRoundOperationsFunding(available, required);
+        if (config.operationsReserveCap < required) {
+            revert OperationsReserveCapBelowRoundRequirement(config.operationsReserveCap, required);
+        }
     }
 
     function validateRoundBuybackCapacity(RoundConfiguration memory config, uint16 maximumInputFeeBps) internal pure {

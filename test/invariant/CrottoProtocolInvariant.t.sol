@@ -179,6 +179,7 @@ contract CrottoProtocolHandler is Test {
     uint128 public lastLockedLiquidity;
     bool public liquidityDecreased;
     bool public purchaseRollbackViolation;
+    bool public operationsRoutingViolation;
     bool public buybackBudgetViolation;
     bool public randomnessChanged;
     bool public winnerChanged;
@@ -239,6 +240,8 @@ contract CrottoProtocolHandler is Test {
 
         bool initializedBefore = pol.polInitialized();
         uint256 bootstrapBefore = pol.bootstrapPolWeth();
+        InvariantAccountingView memory accountingBefore = probe.protocolAccountingProbe();
+        uint256 nativeBefore = diamond.balance;
         bytes32 beforeDigest = _purchaseDigest(roundId);
         vm.recordLogs();
         vm.prank(actor);
@@ -250,6 +253,14 @@ contract CrottoProtocolHandler is Test {
         }
 
         uint256 ticketValue = current.config.ticketPrice * quantity;
+        uint256 operationsFee = current.config.ticketOperationsFee * quantity;
+        uint256 reserveContribution =
+            _reserveContribution(accountingBefore.operationsEth, current.config.operationsReserveCap, operationsFee);
+        InvariantAccountingView memory accountingAfter = probe.protocolAccountingProbe();
+        if (
+            accountingAfter.operationsEth != accountingBefore.operationsEth + reserveContribution
+                || diamond.balance != nativeBefore + reserveContribution
+        ) operationsRoutingViolation = true;
         uint256 expectedBuyback = ticketValue * current.config.buybackShareBps / BPS;
         if (initializedBefore) _checkBuybackLogs(logs, roundId, actor, expectedBuyback);
         else if (pol.bootstrapPolWeth() < bootstrapBefore + expectedBuyback) buybackBudgetViolation = true;
@@ -290,6 +301,8 @@ contract CrottoProtocolHandler is Test {
         uint256 payment = ticketValue + current.config.ticketOperationsFee * quantity + builderFee;
         if (buyer.balance < payment) return;
 
+        InvariantAccountingView memory accountingBefore = probe.protocolAccountingProbe();
+        uint256 nativeBefore = diamond.balance;
         bytes32 beforeDigest = _purchaseDigest(roundId);
         vm.prank(buyer);
         (bool success,) = diamond.call{value: payment}(
@@ -301,7 +314,40 @@ contract CrottoProtocolHandler is Test {
         }
         modeledBuilderCredits[builder] += builderFee;
         modeledBuilderLiability += builderFee;
+        uint256 operationsFee = current.config.ticketOperationsFee * quantity;
+        uint256 reserveContribution =
+            _reserveContribution(accountingBefore.operationsEth, current.config.operationsReserveCap, operationsFee);
+        InvariantAccountingView memory accountingAfter = probe.protocolAccountingProbe();
+        if (
+            accountingAfter.operationsEth != accountingBefore.operationsEth + reserveContribution
+                || diamond.balance != nativeBefore + reserveContribution + builderFee
+        ) operationsRoutingViolation = true;
         _observeLiquidity();
+    }
+
+    function fundOperationsReserve(uint256 actorSeed, uint256 amountSeed) external {
+        uint256 roundId = _currentRoundId();
+        if (roundId == 0) return;
+        Round memory current = _round(roundId);
+        InvariantAccountingView memory accountingBefore = probe.protocolAccountingProbe();
+        uint256 headroom = accountingBefore.operationsEth < current.config.operationsReserveCap
+            ? current.config.operationsReserveCap - accountingBefore.operationsEth
+            : 0;
+        uint256 amount = bound(amountSeed, 1, uint256(current.config.operationsReserveCap) + 1);
+        address actor = _actor(actorSeed);
+        uint256 nativeBefore = diamond.balance;
+
+        vm.prank(actor);
+        (bool success,) = diamond.call{value: amount}(abi.encodeCall(ICrotto.fundOperationsReserve, ()));
+        InvariantAccountingView memory accountingAfter = probe.protocolAccountingProbe();
+        if (success) {
+            if (
+                amount > headroom || accountingAfter.operationsEth != accountingBefore.operationsEth + amount
+                    || diamond.balance != nativeBefore + amount
+            ) operationsRoutingViolation = true;
+        } else if (accountingAfter.operationsEth != accountingBefore.operationsEth || diamond.balance != nativeBefore) {
+            operationsRoutingViolation = true;
+        }
     }
 
     function claimBuilderFees(uint256 builderSeed) external {
@@ -690,6 +736,11 @@ contract CrottoProtocolHandler is Test {
     function _min(uint256 a, uint256 b) private pure returns (uint256) {
         return a < b ? a : b;
     }
+
+    function _reserveContribution(uint256 reserve, uint256 cap, uint256 operationsFee) private pure returns (uint256) {
+        uint256 headroom = reserve < cap ? cap - reserve : 0;
+        return operationsFee < headroom ? operationsFee : headroom;
+    }
 }
 
 contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixture {
@@ -720,7 +771,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         handler.seedActors();
         IERC173(address(diamond)).transferOwnership(address(handler));
 
-        bytes4[] memory selectors = new bytes4[](30);
+        bytes4[] memory selectors = new bytes4[](31);
         selectors[0] = CrottoProtocolHandler.buyTickets.selector;
         selectors[1] = CrottoProtocolHandler.initializePOL.selector;
         selectors[2] = CrottoProtocolHandler.requestRandomness.selector;
@@ -751,6 +802,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         selectors[27] = CrottoProtocolHandler.revokeBuilder.selector;
         selectors[28] = CrottoProtocolHandler.buyTicketsWithBuilder.selector;
         selectors[29] = CrottoProtocolHandler.claimBuilderFees.selector;
+        selectors[30] = CrottoProtocolHandler.fundOperationsReserve.selector;
         targetContract(address(handler));
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
@@ -844,6 +896,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         assertEq(active, bytes32(0));
         assertFalse(handler.buybackBudgetViolation());
         assertFalse(handler.purchaseRollbackViolation());
+        assertFalse(handler.operationsRoutingViolation());
     }
 
     function invariant_PermanentLiquidityNeverDecreases() public view {

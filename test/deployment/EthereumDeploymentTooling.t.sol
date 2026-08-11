@@ -15,6 +15,10 @@ contract CrottoDeploymentConfigHarness is CrottoDeploymentConfig {
     function parseInt24(string memory json) external pure returns (int24) {
         return _int24(json, ".value");
     }
+
+    function parseUint192(string memory json) external pure returns (uint192) {
+        return _uint192(json, ".value", "operationsReserveCap");
+    }
 }
 
 contract EthereumDeploymentToolingTest is Test {
@@ -59,6 +63,7 @@ contract EthereumDeploymentToolingTest is Test {
         assertEq(configuration.round.nftShareBps, 3_000);
         assertEq(configuration.round.treasuryShareBps, 1_000);
         assertEq(configuration.round.buybackShareBps, 1_000);
+        assertEq(configuration.round.operationsReserveCap, 1 ether);
         assertEq(configuration.hook.inputFeeBps, 50);
         assertEq(configuration.hook.outputFeeBps, 50);
         assertEq(configuration.buyback.slippageBps, 500);
@@ -97,6 +102,19 @@ contract EthereumDeploymentToolingTest is Test {
             )
         );
         configurationHarness.parseInt24(json);
+    }
+
+    function test_OperationsReserveCapRejectsUint192Overflow() public {
+        string memory json = '{"value":6277101735386680763835789423207666416102355444464034512896}';
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDeploymentConfig.NarrowValueOverflow.selector,
+                bytes32("operationsReserveCap"),
+                uint256(type(uint192).max) + 1
+            )
+        );
+        configurationHarness.parseUint192(json);
     }
 
     function test_CompleteDeploymentFacetManifestHasNoSelectorCollisions() public view {

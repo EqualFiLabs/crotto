@@ -5,6 +5,7 @@ import {ICrotto} from "../../interfaces/ICrotto.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibOperationsAccounting} from "../../libraries/LibOperationsAccounting.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
+import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
 import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
 
@@ -14,6 +15,7 @@ contract OperationsFacet is CrottoFacet {
 
     error DirectFacetCall();
     error ZeroOperationsContribution();
+    error OperationsReserveContributionExceedsHeadroom(uint256 contribution, uint256 headroom);
     error InvalidCallerRewardReceiver(address receiver);
     error NativeTransferFailed(address receiver, uint256 amount);
     error UnexpectedNativeDebit(uint256 expected, uint256 actual);
@@ -25,7 +27,15 @@ contract OperationsFacet is CrottoFacet {
 
     function fundOperationsReserve() external payable onlyDiamond nonReentrant {
         if (msg.value == 0) revert ZeroOperationsContribution();
-        LibTreasuryStorage.layout().operationsReserveEth += msg.value;
+        LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        uint256 cap = lottery.rounds[lottery.currentRoundId].config.operationsReserveCap;
+        uint256 reserve = treasury.operationsReserveEth;
+        uint256 headroom = reserve < cap ? cap - reserve : 0;
+        if (msg.value > headroom) {
+            revert OperationsReserveContributionExceedsHeadroom(msg.value, headroom);
+        }
+        treasury.operationsReserveEth = reserve + msg.value;
         LibOperationsAccounting.enforceNativeSolvency();
         emit ICrotto.OperationsReserveFunded(msg.sender, msg.value);
     }
