@@ -5,6 +5,7 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
@@ -285,7 +286,7 @@ contract CrottoProtocolHandler is Test {
         uint16 feeBps = SafeCast.toUint16(bound(feeSeed, 0, approved));
         uint256 quantity = bound(quantitySeed, 1, current.config.ticketTarget - current.ticketCount);
         uint256 ticketValue = current.config.ticketPrice * quantity;
-        uint256 builderFee = ticketValue * feeBps / BPS;
+        uint256 builderFee = Math.mulDiv(ticketValue, feeBps, BPS);
         uint256 payment = ticketValue + current.config.ticketOperationsFee * quantity + builderFee;
         if (buyer.balance < payment) return;
 
