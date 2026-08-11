@@ -11,8 +11,15 @@ import {CrottoScriptBase} from "../../script/CrottoScriptBase.sol";
 
 contract CrottoScriptBaseHarness is CrottoScriptBase {}
 
+contract CrottoDeploymentConfigHarness is CrottoDeploymentConfig {
+    function parseInt24(string memory json) external pure returns (int24) {
+        return _int24(json, ".value");
+    }
+}
+
 contract EthereumDeploymentToolingTest is Test {
     CrottoDeploymentConfig private configurationReader;
+    CrottoDeploymentConfigHarness private configurationHarness;
     CrottoScriptBaseHarness private scriptBase;
 
     string[15] private facetNames = [
@@ -35,6 +42,7 @@ contract EthereumDeploymentToolingTest is Test {
 
     function setUp() public {
         configurationReader = new CrottoDeploymentConfig();
+        configurationHarness = new CrottoDeploymentConfigHarness();
         scriptBase = new CrottoScriptBaseHarness();
     }
 
@@ -77,6 +85,17 @@ contract EthereumDeploymentToolingTest is Test {
 
         vm.expectRevert(CrottoDeploymentConfig.RuntimeCodeHashEnforcementRequired.selector);
         configurationReader.validateEconomics(configuration);
+    }
+
+    function test_Int24MinimumOverflowUsesNarrowValueError() public {
+        string memory json = '{"value":-57896044618658097711785492504343953926634992332820282019728792003956564819968}';
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                CrottoDeploymentConfig.NarrowValueOverflow.selector, bytes32("canonicalTickSpacing"), uint256(1) << 255
+            )
+        );
+        configurationHarness.parseInt24(json);
     }
 
     function test_CompleteDeploymentFacetManifestHasNoSelectorCollisions() public view {

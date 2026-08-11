@@ -180,10 +180,11 @@ contract CrottoDeploymentConfig is Script {
         value = uint32(parsed);
     }
 
-    function _int24(string memory json, string memory key) private pure returns (int24 value) {
+    function _int24(string memory json, string memory key) internal pure returns (int24 value) {
         int256 parsed = vm.parseJsonInt(json, key);
         if (parsed < type(int24).min || parsed > type(int24).max) {
-            revert NarrowValueOverflow("canonicalTickSpacing", uint256(parsed < 0 ? -parsed : parsed));
+            uint256 magnitude = parsed < 0 ? uint256(-(parsed + 1)) + 1 : uint256(parsed);
+            revert NarrowValueOverflow("canonicalTickSpacing", magnitude);
         }
         value = int24(parsed);
     }
