@@ -154,6 +154,6 @@ contract EthereumDeploymentToolingTest is Test {
             }
         }
 
-        assertEq(seenCount, 91);
+        assertEq(seenCount, 95);
     }
 }
