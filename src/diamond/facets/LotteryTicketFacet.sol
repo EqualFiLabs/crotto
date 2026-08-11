@@ -87,10 +87,10 @@ contract LotteryTicketFacet is CrottoFacet {
     ) external view returns (BuilderTicketQuote memory quote) {
         Round storage storedRound = _quotableRound(roundId, quantity);
         (quote.ticketValueEth, quote.operationsFeeEth, quote.totalEth) = _quote(storedRound.config, quantity);
-        quote.builderFeeEth = Math.mulDiv(quote.ticketValueEth, builderFeeBps, CrottoConstants.BPS);
-        quote.totalEth += quote.builderFeeEth;
         (quote.rewardBeneficiary, quote.rewardRedirectEffective) =
             _validateBuilder(player, builder, builderFeeBps, redirectTicketRewards);
+        quote.builderFeeEth = Math.mulDiv(quote.ticketValueEth, builderFeeBps, CrottoConstants.BPS);
+        quote.totalEth += quote.builderFeeEth;
     }
 
     function _buyTickets(uint256 quantity, address builder, uint16 builderFeeBps, bool redirectTicketRewards) private {
@@ -111,9 +111,9 @@ contract LotteryTicketFacet is CrottoFacet {
 
         uint256 requiredPayment;
         (purchase.ticketValue, purchase.operationsContribution, requiredPayment) = _quote(currentRound.config, quantity);
-        purchase.builderFee = Math.mulDiv(purchase.ticketValue, builderFeeBps, CrottoConstants.BPS);
         (purchase.rewardBeneficiary, purchase.rewardRedirectEffective) =
             _validateBuilder(msg.sender, builder, builderFeeBps, redirectTicketRewards);
+        purchase.builderFee = Math.mulDiv(purchase.ticketValue, builderFeeBps, CrottoConstants.BPS);
         requiredPayment += purchase.builderFee;
         if (msg.value != requiredPayment) revert IncorrectTicketPayment(requiredPayment, msg.value);
 

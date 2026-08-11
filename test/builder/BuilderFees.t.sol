@@ -187,6 +187,9 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.BuilderFeeBpsExceeded.selector, 51, 50));
         lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, builder, 51, false);
+
+        vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.BuilderFeeBpsExceeded.selector, type(uint16).max, 50));
+        LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, builder, type(uint16).max, false);
         assertEq(views.round(1).ticketCount, 0);
         assertEq(builders.builderCredit(builder), 0);
     }
