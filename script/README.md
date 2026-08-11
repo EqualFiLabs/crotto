@@ -8,7 +8,8 @@ universal CREATE2 deployer before creating any protocol contract.
 `config/sepolia-rehearsal.json` is an executable rehearsal fixture, not a launch
 recommendation. Mainnet deployment requires an explicitly supplied, reviewed
 configuration file with production treasury, guardian, proposer, and economic
-values. Configuration files contain public inputs only.
+values, including a round-snapshotted Operations Reserve Cap. Configuration
+files contain public inputs only.
 
 ## Deployment rehearsal
 

@@ -45,6 +45,7 @@ contract LotteryTicketFacet is CrottoFacet {
         uint256 endTicketExclusive;
         uint256 ticketValue;
         uint256 operationsContribution;
+        uint256 operationsTreasuryWeth;
         uint256 builderFee;
         address rewardBeneficiary;
         bool rewardRedirectEffective;
@@ -126,17 +127,19 @@ contract LotteryTicketFacet is CrottoFacet {
         lottery.rewardTicketCounts[purchase.roundId][purchase.rewardBeneficiary] += quantity;
         _accrueBuilderFee(purchase, builder, builderFeeBps, quantity);
 
-        (uint256 treasuryAmount, uint256 buybackAmount, bool polInitialized) =
+        (uint256 treasuryAmount, uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized) =
             _routeTicketValue(currentRound, purchase.ticketValue, purchase.operationsContribution);
+        purchase.operationsTreasuryWeth = operationsTreasuryWeth;
 
         if (purchase.endTicketExclusive == currentRound.config.ticketTarget) currentRound.status = RoundStatus.Closed;
 
         address weth = LibGovernanceStorage.layout().immutableConfiguration.weth;
         uint256 wethBefore = IERC20(weth).balanceOf(address(this));
-        IWETH9(weth).deposit{value: purchase.ticketValue}();
+        uint256 wethDeposit = purchase.ticketValue + purchase.operationsTreasuryWeth;
+        IWETH9(weth).deposit{value: wethDeposit}();
         uint256 wethAfter = IERC20(weth).balanceOf(address(this));
         uint256 wethReceived = wethAfter >= wethBefore ? wethAfter - wethBefore : 0;
-        if (wethReceived != purchase.ticketValue) revert UnexpectedWethDeposit(purchase.ticketValue, wethReceived);
+        if (wethReceived != wethDeposit) revert UnexpectedWethDeposit(wethDeposit, wethReceived);
 
         LibAssetTransfer.pushExact(weth, LibGovernanceStorage.layout().treasuryReceiver, treasuryAmount);
         if (polInitialized) LibAutomaticBuyback.execute(purchase.roundId, msg.sender, buybackAmount);
@@ -150,6 +153,7 @@ contract LotteryTicketFacet is CrottoFacet {
             purchase.endTicketExclusive,
             purchase.ticketValue,
             purchase.operationsContribution,
+            purchase.operationsTreasuryWeth,
             buybackAmount,
             !polInitialized
         );
@@ -160,7 +164,7 @@ contract LotteryTicketFacet is CrottoFacet {
 
     function _routeTicketValue(Round storage currentRound, uint256 ticketValue, uint256 operationsContribution)
         private
-        returns (uint256 treasuryAmount, uint256 buybackAmount, bool polInitialized)
+        returns (uint256 treasuryAmount, uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized)
     {
         uint256 winnerAmount = Math.mulDiv(ticketValue, currentRound.config.winnerShareBps, CrottoConstants.BPS);
         uint256 nftAmount = Math.mulDiv(ticketValue, currentRound.config.nftShareBps, CrottoConstants.BPS);
@@ -169,7 +173,14 @@ contract LotteryTicketFacet is CrottoFacet {
 
         currentRound.winnerPoolWeth += winnerAmount;
         LibLotteryStorage.layout().totalWinnerPoolWethLiability += winnerAmount;
-        LibTreasuryStorage.layout().operationsReserveEth += operationsContribution;
+        LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        uint256 operationsReserve = treasury.operationsReserveEth;
+        uint256 operationsCap = currentRound.config.operationsReserveCap;
+        uint256 operationsHeadroom = operationsReserve < operationsCap ? operationsCap - operationsReserve : 0;
+        uint256 reserveContribution = Math.min(operationsContribution, operationsHeadroom);
+        operationsTreasuryWeth = operationsContribution - reserveContribution;
+        treasury.operationsReserveEth = operationsReserve + reserveContribution;
+        treasuryAmount += operationsTreasuryWeth;
         bool activeRewardNfts = LibRewardsStorage.layout().totalActiveWeight != 0;
         polInitialized = LibPOLStorage.layout().initialized;
         if (activeRewardNfts) {

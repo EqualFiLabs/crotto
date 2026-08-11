@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {WETH9} from "@chainlink/contracts/src/v0.8/vendor/canonical-weth/WETH9.sol";
 import {CrottoDiamond} from "../../src/diamond/CrottoDiamond.sol";
 import {CrottoFacet} from "../../src/diamond/CrottoFacet.sol";
@@ -203,7 +204,7 @@ contract LotteryTicketingTest is Test {
     function test_PurchaseWrapsAndRoutesEveryAccountingClassExactly() public {
         uint256 requiredPayment = TICKET_PRICE * 2 + OPERATIONS_FEE * 2;
         vm.expectEmit(true, true, false, true, address(diamond));
-        emit ICrotto.TicketsPurchased(1, player, 2, 0, 2, 202, 0.02 ether, 20, true);
+        emit ICrotto.TicketsPurchased(1, player, 2, 0, 2, 202, 0.02 ether, 0, 20, true);
         vm.prank(player);
         lottery.buyTickets{value: requiredPayment}(2);
 
@@ -269,11 +270,38 @@ contract LotteryTicketingTest is Test {
         (uint256 legacyReserve, uint256 legacyTicketsSold) = stateView.reservedLegacyBuybackState();
         assertEq(legacyReserve, 0);
         assertEq(legacyTicketsSold, 0);
-        assertEq(weth.balanceOf(treasury), 101);
+        assertEq(stateView.operationsReserve(), 0.05 ether);
+        assertEq(address(diamond).balance, 0.05 ether);
+        assertEq(weth.balanceOf(treasury), 101 + 0.05 ether);
 
         vm.prank(player);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.RoundNotOpen.selector, 1, RoundStatus.Closed));
         lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+    }
+
+    function test_PurchaseCrossingCapRetainsHeadroomAndRoutesOverflowToTreasury() public {
+        _buy(player, 4);
+
+        vm.expectEmit(true, true, false, true, address(diamond));
+        emit ICrotto.TicketsPurchased(1, player, 2, 4, 6, 202, 0.02 ether, 0.01 ether, 20, true);
+        _buy(player, 2);
+
+        assertEq(stateView.operationsReserve(), 0.05 ether);
+        assertEq(address(diamond).balance, 0.05 ether);
+        assertEq(weth.balanceOf(treasury), 62 + 0.01 ether);
+        assertEq(weth.balanceOf(address(diamond)), 544);
+    }
+
+    function test_PurchasesAfterFullCapRouteAllOperationsFeesToTreasury() public {
+        _buy(player, 5);
+        uint256 treasuryBefore = weth.balanceOf(treasury);
+
+        _buy(player, 1);
+        _buy(player, 1);
+
+        assertEq(stateView.operationsReserve(), 0.05 ether);
+        assertEq(address(diamond).balance, 0.05 ether);
+        assertEq(weth.balanceOf(treasury) - treasuryBefore, 22 + 0.02 ether);
     }
 
     function test_TicketQuoteMatchesExactRequiredPayment() public view {
@@ -374,10 +402,13 @@ contract LotteryTicketingTest is Test {
         else retainedWeth += nftAmount;
 
         assertEq(weth.balanceOf(address(diamond)), retainedWeth);
-        assertEq(weth.balanceOf(treasury), treasuryAmount);
+        uint256 grossOperationsFee = OPERATIONS_FEE * quantity;
+        uint256 reserveContribution = Math.min(grossOperationsFee, 0.05 ether);
+        uint256 operationsOverflow = grossOperationsFee - reserveContribution;
+        assertEq(weth.balanceOf(treasury), treasuryAmount + operationsOverflow);
         assertEq(retainedWeth + treasuryAmount, ticketValue);
-        assertEq(stateView.operationsReserve(), OPERATIONS_FEE * quantity);
-        assertEq(address(diamond).balance, OPERATIONS_FEE * quantity);
+        assertEq(stateView.operationsReserve(), reserveContribution);
+        assertEq(address(diamond).balance, reserveContribution);
         (uint256 reserve, uint256 sold) = stateView.reservedLegacyBuybackState();
         assertEq(reserve, 0);
         assertEq(sold, 0);
@@ -403,6 +434,29 @@ contract LotteryTicketingTest is Test {
         lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
 
         _assertPurchaseStateUnchanged(address(malformedWeth));
+    }
+
+    function test_OperationsOverflowRollsBackWhenTreasuryDeliveryFails() public {
+        _buy(player, 5);
+        RejectingTransferWeth malformedWeth = new RejectingTransferWeth();
+        stateView.setWeth(address(malformedWeth));
+        Round memory roundBefore = views.round(1);
+        uint256 bootstrapBefore = stateView.bootstrapWeth();
+        uint256 treasuryBefore = weth.balanceOf(treasury);
+
+        vm.prank(player);
+        vm.expectRevert(bytes("transfer rejected"));
+        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+
+        Round memory roundAfter = views.round(1);
+        assertEq(roundAfter.ticketCount, roundBefore.ticketCount);
+        assertEq(roundAfter.winnerPoolWeth, roundBefore.winnerPoolWeth);
+        assertEq(views.ticketBatchCount(1), 1);
+        assertEq(stateView.bootstrapWeth(), bootstrapBefore);
+        assertEq(stateView.operationsReserve(), 0.05 ether);
+        assertEq(address(diamond).balance, 0.05 ether);
+        assertEq(malformedWeth.balanceOf(address(diamond)), 0);
+        assertEq(weth.balanceOf(treasury), treasuryBefore);
     }
 
     function _buy(address buyer, uint256 quantity) private {
@@ -457,7 +511,8 @@ contract LotteryTicketingTest is Test {
                 winnerShareBps: 5_000,
                 nftShareBps: 3_000,
                 treasuryShareBps: 1_000,
-                buybackShareBps: 1_000
+                buybackShareBps: 1_000,
+                operationsReserveCap: 0.05 ether
             }),
             activationConfiguration: ActivationConfiguration({
                 costs: [uint256(100 ether), 200 ether, 300 ether],

@@ -112,7 +112,8 @@ contract CrottoDeploymentConfig is Script {
             winnerShareBps: _uint16(json, ".round.winnerShareBps", "winnerShareBps"),
             nftShareBps: _uint16(json, ".round.nftShareBps", "nftShareBps"),
             treasuryShareBps: _uint16(json, ".round.treasuryShareBps", "treasuryShareBps"),
-            buybackShareBps: _uint16(json, ".round.buybackShareBps", "buybackShareBps")
+            buybackShareBps: _uint16(json, ".round.buybackShareBps", "buybackShareBps"),
+            operationsReserveCap: _uint192(json, ".round.operationsReserveCap", "operationsReserveCap")
         });
 
         uint256[] memory costs = vm.parseJsonUintArray(json, ".activation.costs");
@@ -178,6 +179,12 @@ contract CrottoDeploymentConfig is Script {
         uint256 parsed = vm.parseJsonUint(json, key);
         if (parsed > type(uint32).max) revert NarrowValueOverflow(field, parsed);
         value = uint32(parsed);
+    }
+
+    function _uint192(string memory json, string memory key, bytes32 field) internal pure returns (uint192 value) {
+        uint256 parsed = vm.parseJsonUint(json, key);
+        if (parsed > type(uint192).max) revert NarrowValueOverflow(field, parsed);
+        value = uint192(parsed);
     }
 
     function _int24(string memory json, string memory key) internal pure returns (int24 value) {

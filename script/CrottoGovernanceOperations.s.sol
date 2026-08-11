@@ -4,6 +4,7 @@ pragma solidity 0.8.33;
 import {CrottoTimelock} from "../src/governance/CrottoTimelock.sol";
 import {ICrottoGovernance} from "../src/interfaces/ICrottoGovernance.sol";
 import {ICrottoSwapFeeHook} from "../src/interfaces/ICrottoSwapFeeHook.sol";
+import {ICrottoView} from "../src/interfaces/ICrottoView.sol";
 import {HookConfiguration} from "../src/types/CrottoTypes.sol";
 import {CrottoDeploymentConfig, CrottoDeploymentConfiguration} from "./CrottoDeploymentConfig.sol";
 import {CrottoScriptBase} from "./CrottoScriptBase.sol";
@@ -63,9 +64,13 @@ contract ScheduleRoundConfiguration is CrottoGovernanceOperation {
 }
 
 contract ExecuteRoundConfiguration is CrottoGovernanceOperation {
-    function run() external returns (bytes32) {
+    function run() external returns (bytes32 operationId) {
         CrottoDeploymentConfiguration memory configuration = _configuration();
-        return _execute(abi.encodeCall(ICrottoGovernance.setRoundConfiguration, (configuration.round)));
+        operationId = _execute(abi.encodeCall(ICrottoGovernance.setRoundConfiguration, (configuration.round)));
+        if (
+            keccak256(abi.encode(ICrottoView(vm.envAddress("CROTTO_DIAMOND")).currentRoundConfiguration()))
+                != keccak256(abi.encode(configuration.round))
+        ) revert UnexpectedGovernanceResult("roundConfiguration");
     }
 }
 

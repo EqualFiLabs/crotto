@@ -15,6 +15,7 @@ import {IDiamondLoupe} from "../../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
 import {LibOperationsAccounting} from "../../src/libraries/LibOperationsAccounting.sol";
+import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
 import {CallerAction} from "../../src/types/CrottoTypes.sol";
 
@@ -47,6 +48,14 @@ contract OperationsLifecycleHarness is CrottoFacet {
     error HarnessActionOutOfBounds(uint256 action);
     error HarnessAttemptOutOfBounds(uint256 attempt);
     error RequestCostPaymentFailed(address receiver, uint256 amount);
+    error HarnessCapOutOfBounds(uint256 cap);
+
+    function setOperationsReserveCap(uint256 cap) external {
+        if (cap > type(uint192).max) revert HarnessCapOutOfBounds(cap);
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        lottery.currentRoundId = 1;
+        lottery.rounds[1].config.operationsReserveCap = uint192(cap);
+    }
 
     function processRequest(
         address caller,
@@ -114,6 +123,7 @@ contract OperationsReserveTest is Test {
         operations = OperationsFacet(address(diamond));
         operationsImplementation = operationsFacet;
         lifecycle = OperationsLifecycleHarness(address(diamond));
+        lifecycle.setOperationsReserveCap(100 ether);
         sink = new NativeCostSink();
         vm.deal(donor, 100 ether);
     }
@@ -138,6 +148,53 @@ contract OperationsReserveTest is Test {
         assertEq(address(operationsImplementation).balance, 0);
         assertEq(operations.operationsReserve(), 0);
         assertEq(address(diamond).balance, 0);
+    }
+
+    function test_FundingMayFillExactHeadroomButCannotExceedCap() public {
+        lifecycle.setOperationsReserveCap(5 ether);
+        _fund(4 ether);
+        _fund(1 ether);
+
+        assertEq(operations.operationsReserve(), 5 ether);
+        assertEq(address(diamond).balance, 5 ether);
+
+        vm.prank(donor);
+        vm.expectRevert(
+            abi.encodeWithSelector(OperationsFacet.OperationsReserveContributionExceedsHeadroom.selector, 1, 0)
+        );
+        operations.fundOperationsReserve{value: 1}();
+    }
+
+    function test_OperationalSpendingReopensDonationHeadroom() public {
+        lifecycle.setOperationsReserveCap(5 ether);
+        _fund(5 ether);
+        lifecycle.processRequest(
+            requestCaller, uint256(CallerAction.RandomnessRequest), 1, 1, 1 ether, 1 ether, 1 ether, address(sink)
+        );
+
+        assertEq(operations.operationsReserve(), 3 ether);
+        _fund(2 ether);
+        assertEq(operations.operationsReserve(), 5 ether);
+
+        vm.prank(donor);
+        vm.expectRevert(
+            abi.encodeWithSelector(OperationsFacet.OperationsReserveContributionExceedsHeadroom.selector, 1, 0)
+        );
+        operations.fundOperationsReserve{value: 1}();
+    }
+
+    function test_LowerRoundCapDoesNotReclassifyExistingReserve() public {
+        _fund(5 ether);
+        lifecycle.setOperationsReserveCap(4 ether);
+
+        vm.prank(donor);
+        vm.expectRevert(
+            abi.encodeWithSelector(OperationsFacet.OperationsReserveContributionExceedsHeadroom.selector, 1 ether, 0)
+        );
+        operations.fundOperationsReserve{value: 1 ether}();
+
+        assertEq(operations.operationsReserve(), 5 ether);
+        assertEq(address(diamond).balance, 5 ether);
     }
 
     function test_RequestAndRetriesDeductExactCostsWhilePreservingFinalizationFloor() public {
@@ -376,9 +433,10 @@ contract OperationsReserveTest is Test {
     }
 
     function _lifecycleSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](3);
+        selectors = new bytes4[](4);
         selectors[0] = OperationsLifecycleHarness.processRequest.selector;
         selectors[1] = OperationsLifecycleHarness.processFinalization.selector;
         selectors[2] = OperationsLifecycleHarness.wasCredited.selector;
+        selectors[3] = OperationsLifecycleHarness.setOperationsReserveCap.selector;
     }
 }

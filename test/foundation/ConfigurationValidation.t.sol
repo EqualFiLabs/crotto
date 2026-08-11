@@ -97,6 +97,10 @@ contract RoundConfigurationPackingHarness {
         RoundConfiguration storage stored = configuration;
         return (stored.winnerShareBps, stored.nftShareBps, stored.treasuryShareBps, stored.buybackShareBps);
     }
+
+    function operationsReserveCap() external view returns (uint192) {
+        return configuration.operationsReserveCap;
+    }
 }
 
 contract ConfigurationValidationTest is Test {
@@ -125,6 +129,21 @@ contract ConfigurationValidationTest is Test {
         assertEq(nft, 4_000);
         assertEq(treasury, 1_000);
         assertEq(buyback, 0);
+        assertEq(packingHarness.operationsReserveCap(), 0);
+    }
+
+    function test_OperationsCapUsesRemainingPackedAllocationSlotWithoutReinterpretingShares() public {
+        uint192 cap = type(uint192).max - 1;
+        uint256 packed = uint256(5_000) | (uint256(3_000) << 16) | (uint256(1_000) << 32) | (uint256(1_000) << 48)
+            | (uint256(cap) << 64);
+        packingHarness.seedLegacyAllocation(packed);
+
+        (uint16 winner, uint16 nft, uint16 treasury, uint16 buyback) = packingHarness.allocation();
+        assertEq(winner, 5_000);
+        assertEq(nft, 3_000);
+        assertEq(treasury, 1_000);
+        assertEq(buyback, 1_000);
+        assertEq(packingHarness.operationsReserveCap(), cap);
     }
 
     function test_DefaultConstantsMatchApprovedEconomics() public pure {
@@ -370,6 +389,31 @@ contract ConfigurationValidationTest is Test {
         harness.validateRoundConfiguration(configuration);
     }
 
+    function test_OperationsReserveCapAcceptsExactRoundRequirement() public view {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        configuration.operationsReserveCap = uint192(
+            configuration.maxVrfCost + configuration.requestCallerReward + configuration.finalizationCallerReward
+        );
+
+        harness.validateRoundConfiguration(configuration);
+    }
+
+    function test_RevertWhen_OperationsReserveCapIsBelowRoundRequirement() public {
+        RoundConfiguration memory configuration = _validRoundConfiguration();
+        uint256 required =
+            configuration.maxVrfCost + configuration.requestCallerReward + configuration.finalizationCallerReward;
+        configuration.operationsReserveCap = uint192(required - 1);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.OperationsReserveCapBelowRoundRequirement.selector,
+                configuration.operationsReserveCap,
+                required
+            )
+        );
+        harness.validateRoundConfiguration(configuration);
+    }
+
     function test_RevertWhen_BootstrapThresholdCannotBeReachedAtSellout() public {
         RoundConfiguration memory configuration = _validRoundConfiguration();
 
@@ -523,7 +567,8 @@ contract ConfigurationValidationTest is Test {
             winnerShareBps: CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS,
             nftShareBps: CrottoConstants.INITIAL_LOTTERY_NFT_SHARE_BPS,
             treasuryShareBps: CrottoConstants.INITIAL_LOTTERY_TREASURY_SHARE_BPS,
-            buybackShareBps: CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS
+            buybackShareBps: CrottoConstants.INITIAL_LOTTERY_BUYBACK_SHARE_BPS,
+            operationsReserveCap: 1 ether
         });
     }
 

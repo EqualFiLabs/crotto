@@ -16,6 +16,7 @@
   "round": {
     "ticketPrice": "1000000000000000000",
     "ticketOperationsFee": "10000000000000000",
+    "operationsReserveCap": "1000000000000000000",
     "playerRewardRate": "10000000000000000000",
     "ticketTarget": "100",
     "maxVrfCost": "500000000000000000",
