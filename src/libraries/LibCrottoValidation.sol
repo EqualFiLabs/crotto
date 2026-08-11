@@ -33,9 +33,9 @@ library LibCrottoValidation {
     error InvalidCanonicalTickSpacing(int24 tickSpacing);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
-    error InvalidBuybackSlippage(uint256 slippageBps);
-    error InsufficientBuybackExecutionAmount(uint256 grossWeth, uint256 maximumInputFeeBps);
-    error BuybackSwapCapacityExceeded(uint256 maximumGrossWeth);
+    error InvalidBuybackCallerTip(uint256 callerTipBps);
+    error InvalidBuybackMaximumChunk(uint256 maximumWethChunk);
+    error InvalidVrfTimeout(uint256 timeoutBlocks, uint256 minimum, uint256 maximum);
 
     function validateImmutableConfiguration(ImmutableConfiguration memory config) internal pure {
         _nonzero(config.activationToken, "activationToken");
@@ -74,7 +74,7 @@ library LibCrottoValidation {
         _positive(config.playerRewardRate, "playerRewardRate");
         _positive(config.ticketTarget, "ticketTarget");
         _positive(config.maxVrfCost, "maxVrfCost");
-        _positive(config.vrfRetryDelay, "vrfRetryDelay");
+        _positive(config.vrfTimeoutBlocks, "vrfTimeoutBlocks");
         _positive(config.requestCallerReward, "requestCallerReward");
         _positive(config.finalizationCallerReward, "finalizationCallerReward");
         validateAllocation(config.winnerShareBps, config.nftShareBps, config.treasuryShareBps, config.buybackShareBps);
@@ -106,19 +106,6 @@ library LibCrottoValidation {
         }
     }
 
-    function validateRoundBuybackCapacity(RoundConfiguration memory config, uint16 maximumInputFeeBps) internal pure {
-        uint256 grossWeth = Math.mulDiv(config.ticketPrice, config.buybackShareBps, CrottoConstants.BPS);
-        uint256 maximumInputFee = Math.mulDiv(grossWeth, maximumInputFeeBps, CrottoConstants.BPS, Math.Rounding.Ceil);
-        if (grossWeth == 0 || maximumInputFee >= grossWeth) {
-            revert InsufficientBuybackExecutionAmount(grossWeth, maximumInputFeeBps);
-        }
-        uint256 maximumGrossWeth =
-            Math.mulDiv(config.ticketPrice * config.ticketTarget, config.buybackShareBps, CrottoConstants.BPS);
-        if (maximumGrossWeth > uint256(uint128(type(int128).max))) {
-            revert BuybackSwapCapacityExceeded(maximumGrossWeth);
-        }
-    }
-
     function validateBootstrapReachability(RoundConfiguration memory config, uint256 requiredBootstrapWeth)
         internal
         pure
@@ -135,8 +122,18 @@ library LibCrottoValidation {
     }
 
     function validateBuybackConfiguration(BuybackConfiguration memory config) internal pure {
-        if (config.slippageBps == 0 || config.slippageBps >= CrottoConstants.BPS) {
-            revert InvalidBuybackSlippage(config.slippageBps);
+        if (config.callerTipBps > CrottoConstants.MAX_BUYBACK_CALLER_TIP_BPS) {
+            revert InvalidBuybackCallerTip(config.callerTipBps);
+        }
+        if (config.maximumWethChunk == 0 || config.maximumWethChunk > uint128(type(int128).max)) {
+            revert InvalidBuybackMaximumChunk(config.maximumWethChunk);
+        }
+    }
+
+    function validateVrfTimeout(uint256 timeoutBlocks, uint16 requestConfirmations) internal pure {
+        uint256 minimum = uint256(requestConfirmations) + 2;
+        if (timeoutBlocks < minimum || timeoutBlocks > CrottoConstants.MAX_VRF_TIMEOUT_BLOCKS) {
+            revert InvalidVrfTimeout(timeoutBlocks, minimum, CrottoConstants.MAX_VRF_TIMEOUT_BLOCKS);
         }
     }
 

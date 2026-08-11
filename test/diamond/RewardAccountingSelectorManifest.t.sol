@@ -11,13 +11,14 @@ contract RewardAccountingSelectorManifestTest is Test {
 
     function test_ArtifactExposesOnlyApprovedRewardAccountingSelectors() public view {
         bytes4[] memory selectors = _artifactSelectors(FACET_ARTIFACT);
-        assertEq(selectors.length, 6);
+        assertEq(selectors.length, 7);
         _assertContains(selectors, RewardAccountingFacet.routeHookRevenue.selector);
         _assertContains(selectors, RewardAccountingFacet.totalActiveWeight.selector);
         _assertContains(selectors, RewardAccountingFacet.wethRewardBook.selector);
         _assertContains(selectors, RewardAccountingFacet.tokenRewardBook.selector);
         _assertContains(selectors, RewardAccountingFacet.nftRewardPosition.selector);
         _assertContains(selectors, RewardAccountingFacet.pendingNFTRewards.selector);
+        _assertContains(selectors, RewardAccountingFacet.provisionalNFTRewardPosition.selector);
     }
 
     function _artifactSelectors(string memory artifactPath) private view returns (bytes4[] memory selectors) {

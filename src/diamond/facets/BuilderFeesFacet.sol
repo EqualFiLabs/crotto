@@ -7,7 +7,9 @@ import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibOperationsAccounting} from "../../libraries/LibOperationsAccounting.sol";
 import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStorage.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
-import {BuilderApproval} from "../../types/CrottoTypes.sol";
+import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
+import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
+import {BuilderApproval, RoundStatus} from "../../types/CrottoTypes.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
 
 /// @notice Player-controlled Builder approvals and isolated native ETH pull claims.
@@ -24,6 +26,7 @@ contract BuilderFeesFacet is CrottoFacet {
     error InvalidBuilderFeeReceiver(address receiver);
     error NativeTransferFailed(address receiver, uint256 amount);
     error UnexpectedNativeDebit(uint256 expected, uint256 actual);
+    error BuilderRoundNotFinalized(uint256 roundId, RoundStatus status);
 
     modifier onlyDiamond() {
         if (address(this) == _facetSelf) revert DirectFacetCall();
@@ -81,6 +84,21 @@ contract BuilderFeesFacet is CrottoFacet {
         emit ICrottoBuilderFees.BuilderFeesClaimed(msg.sender, receiver, amount);
     }
 
+    function settleBuilderFees(uint256 roundId) external onlyDiamond nonReentrant returns (uint256 amount) {
+        RoundStatus status = LibLotteryStorage.layout().rounds[roundId].status;
+        if (roundId == 0 || status != RoundStatus.Finalized) revert BuilderRoundNotFinalized(roundId, status);
+
+        LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
+        amount = settlements.provisionalBuilderCreditEth[roundId][msg.sender];
+        if (amount == 0) revert BuilderFeeUnavailable(msg.sender);
+        settlements.provisionalBuilderCreditEth[roundId][msg.sender] = 0;
+
+        LibBuilderFeesStorage.Layout storage builders = LibBuilderFeesStorage.layout();
+        builders.provisionalNativeEthLiability -= amount;
+        builders.credits[msg.sender] += amount;
+        emit ICrottoBuilderFees.BuilderFeesSettled(roundId, msg.sender, amount);
+    }
+
     function builderApproval(address player, address builder) external view returns (BuilderApproval memory) {
         return LibBuilderFeesStorage.layout().approvals[player][builder];
     }
@@ -91,6 +109,11 @@ contract BuilderFeesFacet is CrottoFacet {
 
     function totalBuilderFeeLiability() external view returns (uint256) {
         return LibBuilderFeesStorage.layout().totalNativeEthLiability;
+    }
+
+    function provisionalBuilderCredit(uint256 roundId, address builder) external view returns (uint256) {
+        if (LibLotteryStorage.layout().rounds[roundId].status == RoundStatus.Expired) return 0;
+        return LibRoundSettlementStorage.layout().provisionalBuilderCreditEth[roundId][builder];
     }
 
     /// @dev Ignores return data so a recipient cannot force an unbounded copy into Diamond memory.

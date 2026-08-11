@@ -10,6 +10,7 @@ import {
     RequestRecord,
     Round,
     RoundConfiguration,
+    RoundSettlement,
     TicketBatch
 } from "../types/CrottoTypes.sol";
 
@@ -59,6 +60,13 @@ interface ICrottoView {
     function playerRewardEntitlement(uint256 roundId, address player) external view returns (uint256);
 
     function requestRecord(uint256 requestId) external view returns (RequestRecord memory);
+
+    function roundSettlement(uint256 roundId) external view returns (RoundSettlement memory);
+
+    function expiredRoundRefund(uint256 roundId, address buyer)
+        external
+        view
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth, bool claimed);
 
     function callerCredit(address account) external view returns (uint256);
 

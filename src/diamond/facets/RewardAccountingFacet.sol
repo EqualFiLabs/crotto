@@ -6,7 +6,8 @@ import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
 import {LibRewardAccounting} from "../../libraries/LibRewardAccounting.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
-import {NFTRewardPosition, RewardBook} from "../../types/CrottoTypes.sol";
+import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
+import {NFTRewardPosition, ProvisionalNFTRewardPosition, RewardBook} from "../../types/CrottoTypes.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
 
 /// @notice Two-asset Reward NFT books, views, and authenticated hook revenue routing.
@@ -56,5 +57,9 @@ contract RewardAccountingFacet is CrottoFacet {
 
     function pendingNFTRewards(uint256 tokenId) external view returns (uint256 wethAmount, uint256 tokenAmount) {
         return LibRewardAccounting.pending(tokenId);
+    }
+
+    function provisionalNFTRewardPosition(uint256 tokenId) external view returns (ProvisionalNFTRewardPosition memory) {
+        return LibRoundSettlementStorage.layout().nftPositions[tokenId];
     }
 }

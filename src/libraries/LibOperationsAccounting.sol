@@ -56,6 +56,22 @@ library LibOperationsAccounting {
         emit ICrotto.CallerRewardCredited(caller, CallerAction.Finalization, roundId, callerReward);
     }
 
+    function creditExpiration(address caller, uint256 roundId, uint256 callerReward)
+        internal
+        returns (bytes32 creditKey)
+    {
+        LibTreasuryStorage.Layout storage state = LibTreasuryStorage.layout();
+        uint256 available = state.operationsReserveEth;
+        if (available < callerReward) revert InsufficientOperationsReserve(available, callerReward);
+
+        creditKey = keccak256(abi.encode(CallerAction.Expiration, roundId));
+        _consumeCreditKey(state, creditKey);
+        state.operationsReserveEth = available - callerReward;
+        _increaseCallerCredit(state, caller, callerReward);
+
+        emit ICrotto.CallerRewardCredited(caller, CallerAction.Expiration, roundId, callerReward);
+    }
+
     function enforceNativeSolvency() internal view {
         LibTreasuryStorage.Layout storage state = LibTreasuryStorage.layout();
         uint256 required = state.operationsReserveEth + state.totalCallerCreditsEth

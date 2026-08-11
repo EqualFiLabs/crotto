@@ -106,7 +106,7 @@ contract CrottoDeploymentConfig is Script {
             playerRewardRate: vm.parseJsonUint(json, ".round.playerRewardRate"),
             ticketTarget: vm.parseJsonUint(json, ".round.ticketTarget"),
             maxVrfCost: vm.parseJsonUint(json, ".round.maxVrfCost"),
-            vrfRetryDelay: vm.parseJsonUint(json, ".round.vrfRetryDelay"),
+            vrfTimeoutBlocks: vm.parseJsonUint(json, ".round.vrfTimeoutBlocks"),
             requestCallerReward: vm.parseJsonUint(json, ".round.requestCallerReward"),
             finalizationCallerReward: vm.parseJsonUint(json, ".round.finalizationCallerReward"),
             winnerShareBps: _uint16(json, ".round.winnerShareBps", "winnerShareBps"),
@@ -135,8 +135,12 @@ contract CrottoDeploymentConfig is Script {
             nftShareBps: _uint16(json, ".hook.nftShareBps", "hookNftShareBps"),
             treasuryShareBps: _uint16(json, ".hook.treasuryShareBps", "hookTreasuryShareBps")
         });
-        configuration.buyback =
-            BuybackConfiguration({slippageBps: _uint16(json, ".buyback.slippageBps", "slippageBps")});
+        uint256 maximumWethChunk = vm.parseJsonUint(json, ".buyback.maximumWethChunk");
+        if (maximumWethChunk > type(uint128).max) revert NarrowValueOverflow("maximumWethChunk", maximumWethChunk);
+        configuration.buyback = BuybackConfiguration({
+            callerTipBps: _uint16(json, ".buyback.callerTipBps", "callerTipBps"),
+            maximumWethChunk: uint128(maximumWethChunk)
+        });
     }
 
     function validateTarget(EthereumTarget memory target) public view {
@@ -155,7 +159,9 @@ contract CrottoDeploymentConfig is Script {
             if (configuration.proposers[i] == address(0)) revert MissingProposer();
         }
         LibCrottoValidation.validateRoundConfiguration(configuration.round);
-        LibCrottoValidation.validateRoundBuybackCapacity(configuration.round, configuration.maxCombinedHookFeeBps);
+        LibCrottoValidation.validateVrfTimeout(
+            configuration.round.vrfTimeoutBlocks, configuration.vrfRequestConfirmations
+        );
         LibCrottoValidation.validateBootstrapReachability(configuration.round, configuration.requiredBootstrapWeth);
         LibCrottoValidation.validateActivationConfiguration(configuration.activation, configuration.rewardNFTMaxSupply);
         LibCrottoValidation.validateHookConfiguration(configuration.hook, configuration.maxCombinedHookFeeBps);

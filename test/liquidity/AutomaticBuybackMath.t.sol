@@ -6,25 +6,12 @@ import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
 import {LibAutomaticBuybackMath} from "../../src/libraries/LibAutomaticBuybackMath.sol";
 
 contract AutomaticBuybackMathHarness {
-    function quote(
-        uint256 grossBudget,
-        uint16 inputFeeBps,
-        uint16 outputFeeBps,
-        uint16 slippageBps,
-        uint160 sqrtPriceX96,
-        bool wethIsCurrency0
-    ) external pure returns (LibAutomaticBuybackMath.Quote memory) {
-        return LibAutomaticBuybackMath.quote(
-            grossBudget, inputFeeBps, outputFeeBps, slippageBps, sqrtPriceX96, wethIsCurrency0
-        );
-    }
-
-    function sqrtPriceLimit(uint160 currentSqrtPriceX96, uint16 slippageBps, bool zeroForOne)
+    function quote(uint256 grossBudget, uint16 inputFeeBps, bool wethIsCurrency0)
         external
         pure
-        returns (uint160)
+        returns (LibAutomaticBuybackMath.Quote memory)
     {
-        return LibAutomaticBuybackMath.sqrtPriceLimit(currentSqrtPriceX96, slippageBps, zeroForOne);
+        return LibAutomaticBuybackMath.quote(grossBudget, inputFeeBps, wethIsCurrency0);
     }
 }
 
@@ -34,56 +21,25 @@ contract AutomaticBuybackMathTest is Test {
     function testFuzz_GrossBudgetIsFullyDebitedAndFeesStayInsideIt(uint128 grossSeed, uint16 feeSeed) public view {
         uint256 grossBudget = bound(uint256(grossSeed), 10_001, type(uint128).max);
         uint16 inputFeeBps = uint16(bound(uint256(feeSeed), 0, 100));
-        LibAutomaticBuybackMath.Quote memory result =
-            harness.quote(grossBudget, inputFeeBps, 50, 500, TickMath.getSqrtPriceAtTick(0), true);
+        LibAutomaticBuybackMath.Quote memory result = harness.quote(grossBudget, inputFeeBps, true);
 
         assertEq(result.specifiedWethIn, grossBudget);
         assertEq(result.totalWethDebit, grossBudget);
         assertLt(result.inputHookFee, grossBudget);
-        assertGt(result.spotNetTokenOut, result.minimumNetTokenOut);
     }
 
-    function test_DirectionalLimitsProtectBothCurrencyOrders() public view {
-        uint160 current = TickMath.getSqrtPriceAtTick(0);
-        LibAutomaticBuybackMath.Quote memory wethCurrency0 = harness.quote(1 ether, 50, 50, 500, current, true);
-        LibAutomaticBuybackMath.Quote memory wethCurrency1 = harness.quote(1 ether, 50, 50, 500, current, false);
+    function test_DirectionalLimitsPermitFullRangeExecutionForBothCurrencyOrders() public view {
+        LibAutomaticBuybackMath.Quote memory wethCurrency0 = harness.quote(1 ether, 50, true);
+        LibAutomaticBuybackMath.Quote memory wethCurrency1 = harness.quote(1 ether, 50, false);
 
-        assertLt(wethCurrency0.sqrtPriceLimitX96, current);
-        assertGt(wethCurrency1.sqrtPriceLimitX96, current);
-        assertEq(wethCurrency0.minimumNetTokenOut, wethCurrency1.minimumNetTokenOut);
+        assertEq(wethCurrency0.sqrtPriceLimitX96, TickMath.MIN_SQRT_PRICE + 1);
+        assertEq(wethCurrency1.sqrtPriceLimitX96, TickMath.MAX_SQRT_PRICE - 1);
     }
 
     function test_FeeCeilingRejectsBudgetsThatLeaveNoPoolInput() public {
         vm.expectRevert(
             abi.encodeWithSelector(LibAutomaticBuybackMath.ZeroSpecifiedWethInput.selector, uint256(1), uint16(100))
         );
-        harness.quote(1, 100, 0, 500, TickMath.getSqrtPriceAtTick(0), true);
-    }
-
-    function test_OutputFeeRoundingRejectsZeroProtectedOutput() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(LibAutomaticBuybackMath.ZeroNetTokenOutput.selector, uint256(2), uint16(100))
-        );
-        harness.quote(2, 0, 100, 500, TickMath.getSqrtPriceAtTick(0), true);
-    }
-
-    function test_RevertWhen_NoValidDirectionalPriceLimitRemains() public {
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                LibAutomaticBuybackMath.PriceLimitUnavailable.selector,
-                uint160(uint256(TickMath.MIN_SQRT_PRICE) + 1),
-                true
-            )
-        );
-        harness.sqrtPriceLimit(uint160(uint256(TickMath.MIN_SQRT_PRICE) + 1), 500, true);
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                LibAutomaticBuybackMath.PriceLimitUnavailable.selector,
-                uint160(uint256(TickMath.MAX_SQRT_PRICE) - 1),
-                false
-            )
-        );
-        harness.sqrtPriceLimit(uint160(uint256(TickMath.MAX_SQRT_PRICE) - 1), 500, false);
+        harness.quote(1, 100, true);
     }
 }

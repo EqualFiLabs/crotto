@@ -25,8 +25,8 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         LibGovernanceStorage.Layout storage state = _governanceState();
 
         LibCrottoValidation.validateRoundConfiguration(configuration);
-        LibCrottoValidation.validateRoundBuybackCapacity(
-            configuration, state.immutableConfiguration.maxCombinedHookFeeBps
+        LibCrottoValidation.validateVrfTimeout(
+            configuration.vrfTimeoutBlocks, state.immutableConfiguration.vrfRequestConfirmations
         );
         LibCrottoValidation.validateBootstrapReachability(
             configuration, state.immutableConfiguration.requiredBootstrapWeth
@@ -40,7 +40,7 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         LibDiamond.enforceIsContractOwner();
         LibGovernanceStorage.Layout storage state = _governanceState();
         LibCrottoValidation.validateBuybackConfiguration(configuration);
-        state.buybackConfiguration = configuration;
+        LibGovernanceStorage.storeBuybackConfiguration(state, configuration);
         emit BuybackConfigurationSet(configuration);
     }
 
@@ -126,7 +126,8 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
     }
 
     function buybackConfiguration() external view returns (BuybackConfiguration memory) {
-        return _governanceState().buybackConfiguration;
+        LibGovernanceStorage.Layout storage state = _governanceState();
+        return LibGovernanceStorage.loadBuybackConfiguration(state);
     }
 
     function _governanceState() private view returns (LibGovernanceStorage.Layout storage state) {

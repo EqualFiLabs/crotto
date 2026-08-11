@@ -85,7 +85,7 @@ contract LotteryRoundViewsTest is Test {
         assertEq(storedRound.config.playerRewardRate, 10 ether);
         assertEq(storedRound.config.ticketTarget, 100);
         assertEq(storedRound.config.maxVrfCost, 0.5 ether);
-        assertEq(storedRound.config.vrfRetryDelay, 10 minutes);
+        assertEq(storedRound.config.vrfTimeoutBlocks, 10 minutes);
         assertEq(storedRound.config.requestCallerReward, 0.1 ether);
         assertEq(storedRound.config.finalizationCallerReward, 0.1 ether);
         assertEq(storedRound.config.winnerShareBps, 5_000);
@@ -150,7 +150,7 @@ contract LotteryRoundViewsTest is Test {
             playerRewardRate: 10 ether,
             ticketTarget: 100,
             maxVrfCost: 0.5 ether,
-            vrfRetryDelay: 10 minutes,
+            vrfTimeoutBlocks: 10 minutes,
             requestCallerReward: 0.1 ether,
             finalizationCallerReward: 0.1 ether,
             winnerShareBps: 5_000,

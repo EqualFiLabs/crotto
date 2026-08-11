@@ -18,14 +18,7 @@ import {ICrotto} from "../../src/interfaces/ICrotto.sol";
 import {LibCrottoGuard} from "../../src/libraries/LibCrottoGuard.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
-import {
-    IgnoredFulfillmentReason,
-    ImmutableConfiguration,
-    RequestRecord,
-    Round,
-    RoundConfiguration,
-    RoundStatus
-} from "../../src/types/CrottoTypes.sol";
+import {RequestRecord, Round, RoundConfiguration, RoundStatus} from "../../src/types/CrottoTypes.sol";
 
 contract NativeVrfWrapperMock {
     uint256 public price = 0.2 ether;
@@ -99,6 +92,7 @@ contract LotteryRandomnessStateHarness {
         lottery.rounds[1].status = RoundStatus.Closed;
         lottery.rounds[1].config = configuration;
         lottery.rounds[1].ticketCount = configuration.ticketTarget;
+        lottery.rounds[1].closedAtBlock = uint64(block.number);
     }
 
     function setStatus(uint256 status) external {
@@ -115,11 +109,10 @@ contract LotteryRandomnessTest is Test {
     uint256 private constant REQUEST_COST = 0.2 ether;
     uint256 private constant REQUEST_REWARD = 0.1 ether;
     uint256 private constant FINALIZATION_REWARD = 0.3 ether;
-    uint256 private constant RETRY_DELAY = 10 minutes;
+    uint256 private constant VRF_TIMEOUT_BLOCKS = 30;
 
     address private donor = makeAddr("donor");
     address private requester = makeAddr("requester");
-    address private retryCaller = makeAddr("retryCaller");
 
     CrottoDiamond private diamond;
     LotteryVRFFacet private randomness;
@@ -163,7 +156,6 @@ contract LotteryRandomnessTest is Test {
     }
 
     function test_FirstRequestUsesNativeDirectFundingAndRecordsAttempt() public {
-        vm.warp(1 days);
         vm.prank(requester);
         uint256 requestId = randomness.requestRandomness(1);
 
@@ -171,7 +163,7 @@ contract LotteryRandomnessTest is Test {
         RequestRecord memory record = views.requestRecord(requestId);
         assertEq(requestId, 100);
         assertEq(uint8(storedRound.status), uint8(RoundStatus.VRFPending));
-        assertEq(storedRound.latestRequestAt, block.timestamp);
+        assertEq(storedRound.latestRequestBlock, block.number);
         assertEq(storedRound.requestAttempts, 1);
         assertEq(record.roundId, 1);
         assertEq(record.attempt, 1);
@@ -187,43 +179,24 @@ contract LotteryRandomnessTest is Test {
         assertEq(address(wrapper).balance, REQUEST_COST);
     }
 
-    function test_RetryRequiresDelayAndRecordsEveryAttempt() public {
-        vm.warp(1 days);
+    function test_SecondRequestIsRejected() public {
         vm.prank(requester);
-        uint256 firstRequestId = randomness.requestRandomness(1);
+        randomness.requestRandomness(1);
 
-        vm.warp(block.timestamp + RETRY_DELAY - 1);
-        vm.prank(retryCaller);
+        vm.prank(requester);
         vm.expectRevert(
-            abi.encodeWithSelector(LotteryVRFFacet.RandomnessRetryTooEarly.selector, 1, RETRY_DELAY - 1, RETRY_DELAY)
+            abi.encodeWithSelector(LotteryVRFFacet.InvalidRandomnessRequestStatus.selector, 1, RoundStatus.VRFPending)
         );
-        randomness.retryRandomness(1);
-
-        vm.warp(block.timestamp + 1);
-        vm.prank(retryCaller);
-        uint256 retryRequestId = randomness.retryRandomness(1);
-
-        assertEq(retryRequestId, firstRequestId + 1);
-        assertEq(views.requestRecord(firstRequestId).attempt, 1);
-        assertEq(views.requestRecord(retryRequestId).attempt, 2);
-        assertEq(views.round(1).requestAttempts, 2);
-        assertEq(operations.callerCredit(retryCaller), REQUEST_REWARD);
+        randomness.requestRandomness(1);
     }
 
-    function test_FirstFulfillmentWinsAcrossOutstandingAttempts() public {
-        (uint256 firstRequestId, uint256 retryRequestId) = _requestAndRetry();
-        _fulfill(firstRequestId, 77);
-        assertEq(uint8(views.round(1).status), uint8(RoundStatus.RandomReady));
-        assertEq(views.round(1).acceptedRandomWord, 77);
-
-        _fulfill(retryRequestId, 88);
-        assertEq(views.round(1).acceptedRandomWord, 77);
-
-        vm.prank(retryCaller);
-        vm.expectRevert(
-            abi.encodeWithSelector(LotteryVRFFacet.InvalidRandomnessRequestStatus.selector, 1, RoundStatus.RandomReady)
-        );
-        randomness.retryRandomness(1);
+    function test_LateFulfillmentIsIgnored() public {
+        vm.prank(requester);
+        uint256 requestId = randomness.requestRandomness(1);
+        vm.roll(block.number + VRF_TIMEOUT_BLOCKS + 1);
+        _fulfill(requestId, 77);
+        assertEq(uint8(views.round(1).status), uint8(RoundStatus.VRFPending));
+        assertEq(views.round(1).acceptedRandomWord, 0);
     }
 
     function test_MalformedAndUnknownFulfillmentsAreIgnored() public {
@@ -314,27 +287,31 @@ contract LotteryRandomnessTest is Test {
         randomness.requestRandomness(1);
     }
 
-    function testFuzz_AcceptedWordNeverChanges(bool fulfillOlderFirst, uint256 olderWord, uint256 newerWord) public {
-        (uint256 olderRequestId, uint256 newerRequestId) = _requestAndRetry();
-        uint256 firstId = fulfillOlderFirst ? olderRequestId : newerRequestId;
-        uint256 secondId = fulfillOlderFirst ? newerRequestId : olderRequestId;
-        uint256 firstWord = fulfillOlderFirst ? olderWord : newerWord;
-        uint256 secondWord = fulfillOlderFirst ? newerWord : olderWord;
+    function test_RequestAtInclusiveCloseDeadlineSucceeds() public {
+        uint256 deadline = block.number + VRF_TIMEOUT_BLOCKS;
+        vm.roll(deadline);
+        vm.prank(requester);
+        randomness.requestRandomness(1);
+    }
 
-        _fulfill(firstId, firstWord);
-        _fulfill(secondId, secondWord);
+    function test_RevertWhen_RequestAfterCloseDeadline() public {
+        uint256 deadline = block.number + VRF_TIMEOUT_BLOCKS;
+        vm.roll(deadline + 1);
+        vm.prank(requester);
+        vm.expectRevert(
+            abi.encodeWithSelector(LotteryVRFFacet.RoundRequestDeadlinePassed.selector, 1, deadline + 1, deadline)
+        );
+        randomness.requestRandomness(1);
+    }
+
+    function testFuzz_AcceptedWordNeverChanges(uint256 firstWord, uint256 secondWord) public {
+        vm.prank(requester);
+        uint256 requestId = randomness.requestRandomness(1);
+        _fulfill(requestId, firstWord);
+        _fulfill(requestId, secondWord);
 
         assertEq(views.round(1).acceptedRandomWord, firstWord);
         assertEq(uint8(views.round(1).status), uint8(RoundStatus.RandomReady));
-    }
-
-    function _requestAndRetry() private returns (uint256 firstRequestId, uint256 retryRequestId) {
-        vm.warp(1 days);
-        vm.prank(requester);
-        firstRequestId = randomness.requestRandomness(1);
-        vm.warp(block.timestamp + RETRY_DELAY);
-        vm.prank(retryCaller);
-        retryRequestId = randomness.retryRandomness(1);
     }
 
     function _fulfill(uint256 requestId, uint256 word) private {
@@ -349,7 +326,7 @@ contract LotteryRandomnessTest is Test {
         configuration.playerRewardRate = 10 ether;
         configuration.ticketTarget = 10;
         configuration.maxVrfCost = 0.5 ether;
-        configuration.vrfRetryDelay = RETRY_DELAY;
+        configuration.vrfTimeoutBlocks = VRF_TIMEOUT_BLOCKS;
         configuration.requestCallerReward = REQUEST_REWARD;
         configuration.finalizationCallerReward = FINALIZATION_REWARD;
         configuration.winnerShareBps = 5_000;
@@ -386,10 +363,9 @@ contract LotteryRandomnessTest is Test {
     }
 
     function _randomnessSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](3);
+        selectors = new bytes4[](2);
         selectors[0] = LotteryVRFFacet.requestRandomness.selector;
-        selectors[1] = LotteryVRFFacet.retryRandomness.selector;
-        selectors[2] = LotteryVRFFacet.rawFulfillRandomWords.selector;
+        selectors[1] = LotteryVRFFacet.rawFulfillRandomWords.selector;
     }
 
     function _viewSelectors() private pure returns (bytes4[] memory selectors) {

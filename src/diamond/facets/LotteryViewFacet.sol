@@ -2,7 +2,21 @@
 pragma solidity 0.8.33;
 
 import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
-import {RequestRecord, Round, TicketBatch} from "../../types/CrottoTypes.sol";
+import {LibRewardAccounting} from "../../libraries/LibRewardAccounting.sol";
+import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStorage.sol";
+import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
+import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
+import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
+import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
+import {LibVaultStorage} from "../../libraries/storage/LibVaultStorage.sol";
+import {
+    ProtocolAccountingView,
+    RequestRecord,
+    Round,
+    RoundSettlement,
+    RoundStatus,
+    TicketBatch
+} from "../../types/CrottoTypes.sol";
 
 /// @notice Bounded round, ticket-batch, player, and randomness-attempt views.
 contract LotteryViewFacet {
@@ -60,6 +74,47 @@ contract LotteryViewFacet {
 
     function requestRecord(uint256 requestId) external view returns (RequestRecord memory) {
         return LibLotteryStorage.layout().requests[requestId];
+    }
+
+    function roundSettlement(uint256 roundId) external view returns (RoundSettlement memory) {
+        _enforceRoundExists(roundId);
+        return LibRoundSettlementStorage.layout().rounds[roundId];
+    }
+
+    function expiredRoundRefund(uint256 roundId, address buyer)
+        external
+        view
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth, bool claimed)
+    {
+        _enforceRoundExists(roundId);
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
+        if (lottery.rounds[roundId].status != RoundStatus.Expired) return (0, 0, false);
+        claimed = settlements.refundClaimed[roundId][buyer];
+        if (claimed) return (0, 0, true);
+        ticketRefundWeth = lottery.playerTicketCounts[roundId][buyer] * lottery.rounds[roundId].config.ticketPrice;
+        builderRefundEth = settlements.builderRefundEth[roundId][buyer];
+    }
+
+    function protocolAccounting() external view returns (ProtocolAccountingView memory accounting) {
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        LibRewardsStorage.Layout storage rewards = LibRewardsStorage.layout();
+        LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
+        accounting.winnerPoolWethLiability = lottery.totalWinnerPoolWethLiability;
+        accounting.rewardNftWethLiability =
+            LibRewardAccounting.outstanding(rewards.wethBook) + settlements.lotteryNftWethLiability;
+        accounting.bootstrapPolWeth = LibPOLStorage.layout().bootstrapWeth;
+        accounting.operationsReserveEth = treasury.operationsReserveEth;
+        accounting.callerCreditsEth = treasury.totalCallerCreditsEth;
+        accounting.playerTokenLiability = lottery.totalPlayerTokenLiability;
+        accounting.rewardNftTokenLiability = LibRewardAccounting.outstanding(rewards.tokenBook);
+        accounting.vaultBackingToken = LibVaultStorage.layout().tokenBacking;
+        accounting.ticketEscrowWeth = settlements.activeTicketEscrowWeth;
+        accounting.expiredTicketRefundWeth = settlements.expiredTicketRefundWeth;
+        accounting.pendingBuybackWeth = settlements.pendingBuybackWeth;
+        accounting.provisionalBuilderEth = LibBuilderFeesStorage.layout().provisionalNativeEthLiability;
+        accounting.expiredBuilderRefundEth = settlements.expiredBuilderRefundEth;
     }
 
     function _enforceRoundExists(uint256 roundId) private view {

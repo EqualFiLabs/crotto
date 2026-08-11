@@ -6,22 +6,25 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {ICrotto} from "../../interfaces/ICrotto.sol";
 import {ICrottoBuilderFees} from "../../interfaces/ICrottoBuilderFees.sol";
-import {LibAutomaticBuyback} from "../../libraries/LibAutomaticBuyback.sol";
 import {CrottoConstants} from "../../libraries/CrottoConstants.sol";
 import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibOperationsAccounting} from "../../libraries/LibOperationsAccounting.sol";
+import {LibProvisionalRewardAccounting} from "../../libraries/LibProvisionalRewardAccounting.sol";
+import {LibWethSolvency} from "../../libraries/LibWethSolvency.sol";
 import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStorage.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
+import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
 import {
     BuilderApproval,
     BuilderTicketQuote,
     Round,
     RoundConfiguration,
+    RoundSettlement,
     RoundStatus,
     TicketBatch
 } from "../../types/CrottoTypes.sol";
@@ -127,11 +130,14 @@ contract LotteryTicketFacet is CrottoFacet {
         lottery.rewardTicketCounts[purchase.roundId][purchase.rewardBeneficiary] += quantity;
         _accrueBuilderFee(purchase, builder, builderFeeBps, quantity);
 
-        (uint256 treasuryAmount, uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized) =
+        (uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized) =
             _routeTicketValue(currentRound, purchase.ticketValue, purchase.operationsContribution);
         purchase.operationsTreasuryWeth = operationsTreasuryWeth;
 
-        if (purchase.endTicketExclusive == currentRound.config.ticketTarget) currentRound.status = RoundStatus.Closed;
+        if (purchase.endTicketExclusive == currentRound.config.ticketTarget) {
+            currentRound.status = RoundStatus.Closed;
+            currentRound.closedAtBlock = uint64(block.number);
+        }
 
         address weth = LibGovernanceStorage.layout().immutableConfiguration.weth;
         uint256 wethBefore = IERC20(weth).balanceOf(address(this));
@@ -141,10 +147,12 @@ contract LotteryTicketFacet is CrottoFacet {
         uint256 wethReceived = wethAfter >= wethBefore ? wethAfter - wethBefore : 0;
         if (wethReceived != wethDeposit) revert UnexpectedWethDeposit(wethDeposit, wethReceived);
 
-        LibAssetTransfer.pushExact(weth, LibGovernanceStorage.layout().treasuryReceiver, treasuryAmount);
-        if (polInitialized) LibAutomaticBuyback.execute(purchase.roundId, msg.sender, buybackAmount);
+        LibAssetTransfer.pushExact(
+            weth, LibGovernanceStorage.layout().treasuryReceiver, purchase.operationsTreasuryWeth
+        );
 
         LibOperationsAccounting.enforceNativeSolvency();
+        LibWethSolvency.enforce();
         emit ICrotto.TicketsPurchased(
             purchase.roundId,
             msg.sender,
@@ -164,15 +172,17 @@ contract LotteryTicketFacet is CrottoFacet {
 
     function _routeTicketValue(Round storage currentRound, uint256 ticketValue, uint256 operationsContribution)
         private
-        returns (uint256 treasuryAmount, uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized)
+        returns (uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized)
     {
         uint256 winnerAmount = Math.mulDiv(ticketValue, currentRound.config.winnerShareBps, CrottoConstants.BPS);
         uint256 nftAmount = Math.mulDiv(ticketValue, currentRound.config.nftShareBps, CrottoConstants.BPS);
         buybackAmount = Math.mulDiv(ticketValue, currentRound.config.buybackShareBps, CrottoConstants.BPS);
-        treasuryAmount = ticketValue - winnerAmount - nftAmount - buybackAmount;
-
-        currentRound.winnerPoolWeth += winnerAmount;
-        LibLotteryStorage.layout().totalWinnerPoolWethLiability += winnerAmount;
+        uint256 treasuryAmount = ticketValue - winnerAmount - nftAmount - buybackAmount;
+        LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
+        RoundSettlement storage settlement = settlements.rounds[LibLotteryStorage.layout().currentRoundId];
+        settlement.ticketEscrowWeth += ticketValue;
+        settlement.winnerWeth += winnerAmount;
+        settlements.activeTicketEscrowWeth += ticketValue;
         LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
         uint256 operationsReserve = treasury.operationsReserveEth;
         uint256 operationsCap = currentRound.config.operationsReserveCap;
@@ -180,17 +190,20 @@ contract LotteryTicketFacet is CrottoFacet {
         uint256 reserveContribution = Math.min(operationsContribution, operationsHeadroom);
         operationsTreasuryWeth = operationsContribution - reserveContribution;
         treasury.operationsReserveEth = operationsReserve + reserveContribution;
-        treasuryAmount += operationsTreasuryWeth;
         bool activeRewardNfts = LibRewardsStorage.layout().totalActiveWeight != 0;
         polInitialized = LibPOLStorage.layout().initialized;
         if (activeRewardNfts) {
-            _accrueNftWethRewards(nftAmount);
+            LibProvisionalRewardAccounting.accrue(
+                LibLotteryStorage.layout().currentRoundId, nftAmount, LibRewardsStorage.layout().totalActiveWeight
+            );
         } else if (!polInitialized) {
-            LibPOLStorage.layout().bootstrapWeth += nftAmount;
+            settlement.bootstrapPolWeth += nftAmount;
         } else {
             treasuryAmount += nftAmount;
         }
-        if (!polInitialized) LibPOLStorage.layout().bootstrapWeth += buybackAmount;
+        if (!polInitialized) settlement.bootstrapPolWeth += buybackAmount;
+        else settlement.buybackWeth += buybackAmount;
+        settlement.treasuryWeth += treasuryAmount;
     }
 
     function _accrueBuilderFee(PurchaseContext memory purchase, address builder, uint16 builderFeeBps, uint256 quantity)
@@ -198,8 +211,12 @@ contract LotteryTicketFacet is CrottoFacet {
     {
         if (purchase.builderFee != 0) {
             LibBuilderFeesStorage.Layout storage builders = LibBuilderFeesStorage.layout();
-            builders.credits[builder] += purchase.builderFee;
             builders.totalNativeEthLiability += purchase.builderFee;
+            builders.provisionalNativeEthLiability += purchase.builderFee;
+            LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
+            settlements.provisionalBuilderCreditEth[purchase.roundId][builder] += purchase.builderFee;
+            settlements.builderRefundEth[purchase.roundId][msg.sender] += purchase.builderFee;
+            settlements.rounds[purchase.roundId].builderFeeEth += purchase.builderFee;
             emit ICrottoBuilderFees.BuilderFeeAccrued(
                 msg.sender, builder, purchase.roundId, quantity, builderFeeBps, purchase.builderFee
             );

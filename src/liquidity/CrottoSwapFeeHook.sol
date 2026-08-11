@@ -203,6 +203,16 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         liquidityAdded = _compoundThroughUnlock();
     }
 
+    /// @notice Credits finalized round WETH to permanent-liquidity pending without invoking PoolManager.
+    function creditPOLWeth(uint256 wethAmount) external override onlyDiamond nonReentrantHook {
+        _enforceInitialized();
+        if (wethAmount == 0) revert EmptyPOLDonation();
+        LibAssetTransfer.pullExact(weth, msg.sender, wethAmount);
+        _creditPending(Currency.wrap(weth), wethAmount);
+        _assertPendingSolvency(Currency.wrap(weth));
+        emit POLDonated(msg.sender, 0, wethAmount);
+    }
+
     function compoundPOL() external override nonReentrantHook returns (uint128 liquidityAdded) {
         _enforceInitialized();
         liquidityAdded = _compoundThroughUnlock();

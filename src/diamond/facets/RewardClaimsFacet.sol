@@ -6,6 +6,7 @@ import {IRewardNFT} from "../../interfaces/IRewardNFT.sol";
 import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibRewardAccounting} from "../../libraries/LibRewardAccounting.sol";
+import {LibWethSolvency} from "../../libraries/LibWethSolvency.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
 
@@ -19,6 +20,7 @@ contract RewardClaimsFacet is CrottoFacet {
         amount = LibRewardAccounting.consumeWethClaim(tokenId);
         address weth = LibGovernanceStorage.layout().immutableConfiguration.weth;
         LibAssetTransfer.pushExact(weth, receiver, amount);
+        LibWethSolvency.enforce();
         emit ICrottoRewards.NFTRewardClaimed(tokenId, weth, receiver, amount);
     }
 

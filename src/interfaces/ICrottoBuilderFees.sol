@@ -17,6 +17,7 @@ interface ICrottoBuilderFees {
         uint256 amount
     );
     event BuilderFeesClaimed(address indexed builder, address indexed receiver, uint256 amount);
+    event BuilderFeesSettled(uint256 indexed roundId, address indexed builder, uint256 amount);
     event TicketRewardBeneficiarySelected(
         address indexed buyer, address indexed beneficiary, uint256 indexed roundId, uint256 ticketCount
     );
@@ -29,9 +30,13 @@ interface ICrottoBuilderFees {
 
     function claimBuilderFees(address receiver) external returns (uint256 amount);
 
+    function settleBuilderFees(uint256 roundId) external returns (uint256 amount);
+
     function builderApproval(address player, address builder) external view returns (BuilderApproval memory);
 
     function builderCredit(address builder) external view returns (uint256);
 
     function totalBuilderFeeLiability() external view returns (uint256);
+
+    function provisionalBuilderCredit(uint256 roundId, address builder) external view returns (uint256);
 }

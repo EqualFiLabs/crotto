@@ -8,6 +8,8 @@ import {
     EthereumTarget
 } from "../../script/CrottoDeploymentConfig.sol";
 import {CrottoScriptBase} from "../../script/CrottoScriptBase.sol";
+import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
+import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
 
 contract CrottoScriptBaseHarness is CrottoScriptBase {}
 
@@ -64,9 +66,11 @@ contract EthereumDeploymentToolingTest is Test {
         assertEq(configuration.round.treasuryShareBps, 1_000);
         assertEq(configuration.round.buybackShareBps, 1_000);
         assertEq(configuration.round.operationsReserveCap, 1 ether);
+        assertEq(configuration.round.vrfTimeoutBlocks, 30);
         assertEq(configuration.hook.inputFeeBps, 50);
         assertEq(configuration.hook.outputFeeBps, 50);
-        assertEq(configuration.buyback.slippageBps, 500);
+        assertEq(configuration.buyback.callerTipBps, 10);
+        assertEq(configuration.buyback.maximumWethChunk, 0.1 ether);
     }
 
     function test_EthereumTargetsPinVerifiedDependencies() public view {
@@ -90,6 +94,23 @@ contract EthereumDeploymentToolingTest is Test {
         configuration.enforceRuntimeCodeHashes = false;
 
         vm.expectRevert(CrottoDeploymentConfig.RuntimeCodeHashEnforcementRequired.selector);
+        configurationReader.validateEconomics(configuration);
+    }
+
+    function test_RejectsSepoliaConfigurationWithVrfTimeoutBelowConfirmations() public {
+        CrottoDeploymentConfiguration memory configuration = configurationReader.loadConfiguration(
+            string.concat(vm.projectRoot(), "/script/config/sepolia-rehearsal.json")
+        );
+        configuration.round.vrfTimeoutBlocks = configuration.vrfRequestConfirmations + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.InvalidVrfTimeout.selector,
+                configuration.round.vrfTimeoutBlocks,
+                uint256(configuration.vrfRequestConfirmations) + 2,
+                CrottoConstants.MAX_VRF_TIMEOUT_BLOCKS
+            )
+        );
         configurationReader.validateEconomics(configuration);
     }
 
@@ -133,6 +154,6 @@ contract EthereumDeploymentToolingTest is Test {
             }
         }
 
-        assertEq(seenCount, 82);
+        assertEq(seenCount, 90);
     }
 }

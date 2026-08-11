@@ -22,7 +22,6 @@ interface ICrotto {
     event RandomnessRequested(
         uint256 indexed roundId, uint256 indexed requestId, uint32 attempt, address indexed caller
     );
-    event RandomnessRetried(uint256 indexed roundId, uint256 indexed requestId, uint32 attempt, address indexed caller);
     event RandomnessAccepted(uint256 indexed roundId, uint256 indexed requestId, uint256 randomWord);
     event RandomnessIgnored(uint256 indexed requestId, uint256 indexed roundId, IgnoredFulfillmentReason reason);
     event LotteryFinalized(
@@ -31,6 +30,17 @@ interface ICrotto {
         address indexed winner,
         uint256 winnerPoolWeth,
         uint256 playerTokenLiability
+    );
+    event LotteryExpired(
+        uint256 indexed roundId, uint256 ticketRefundWeth, uint256 builderRefundEth, address indexed caller
+    );
+    event ExpiredRoundRefundClaimed(
+        uint256 indexed roundId,
+        address indexed buyer,
+        address indexed wethReceiver,
+        address nativeReceiver,
+        uint256 ticketRefundWeth,
+        uint256 builderRefundEth
     );
     event WinningsClaimed(uint256 indexed roundId, address indexed winner, address indexed receiver, uint256 amount);
     event PlayerRewardsClaimed(
@@ -52,11 +62,15 @@ interface ICrotto {
 
     function requestRandomness(uint256 roundId) external returns (uint256 requestId);
 
-    function retryRandomness(uint256 roundId) external returns (uint256 requestId);
-
     function rawFulfillRandomWords(uint256 requestId, uint256[] calldata randomWords) external;
 
     function finalizeLottery(uint256 roundId) external;
+
+    function expireLottery(uint256 roundId) external;
+
+    function claimExpiredRoundRefund(uint256 roundId, address wethReceiver, address nativeReceiver)
+        external
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth);
 
     function claimWinnings(uint256 roundId, address receiver) external returns (uint256 amount);
 

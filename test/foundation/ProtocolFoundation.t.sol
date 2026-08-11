@@ -35,8 +35,8 @@ contract ProtocolFoundationTest is Test {
     function test_CoreLifecycleSelectorsAreStable() public pure {
         assertEq(ICrotto.buyTickets.selector, bytes4(keccak256("buyTickets(uint256)")));
         assertEq(ICrotto.requestRandomness.selector, bytes4(keccak256("requestRandomness(uint256)")));
-        assertEq(ICrotto.retryRandomness.selector, bytes4(keccak256("retryRandomness(uint256)")));
         assertEq(ICrotto.finalizeLottery.selector, bytes4(keccak256("finalizeLottery(uint256)")));
+        assertEq(ICrotto.expireLottery.selector, bytes4(keccak256("expireLottery(uint256)")));
         assertEq(IPOLInitialization.initializePOL.selector, bytes4(keccak256("initializePOL()")));
     }
 
@@ -111,7 +111,12 @@ contract ProtocolFoundationTest is Test {
             callerCreditsEth: 5,
             playerTokenLiability: 6,
             rewardNftTokenLiability: 7,
-            vaultBackingToken: 8
+            vaultBackingToken: 8,
+            ticketEscrowWeth: 9,
+            expiredTicketRefundWeth: 10,
+            pendingBuybackWeth: 11,
+            provisionalBuilderEth: 12,
+            expiredBuilderRefundEth: 13
         });
         VaultAccountingView memory vault = VaultAccountingView({
             vaultPrice: 9,
