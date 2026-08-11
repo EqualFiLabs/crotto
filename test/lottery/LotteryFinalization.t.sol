@@ -5,6 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC20} from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import {WETH9} from "@chainlink/contracts/src/v0.8/vendor/canonical-weth/WETH9.sol";
 import {CrottoDiamond} from "../../src/diamond/CrottoDiamond.sol";
+import {BuilderFeesFacet} from "../../src/diamond/facets/BuilderFeesFacet.sol";
 import {DiamondCutFacet} from "../../src/diamond/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../../src/diamond/facets/DiamondLoupeFacet.sol";
 import {LotteryFinalizationFacet} from "../../src/diamond/facets/LotteryFinalizationFacet.sol";
@@ -115,6 +116,7 @@ contract LotteryFinalizationTest is Test {
     LotteryFinalizationFacet private finalization;
     LotteryViewFacet private views;
     OperationsFacet private operations;
+    BuilderFeesFacet private builderFees;
     LotteryFinalizationStateHarness private stateHarness;
     NativeVrfWrapperMock private wrapper;
     PlayerRewardTokenMock private token;
@@ -133,10 +135,11 @@ contract LotteryFinalizationTest is Test {
         LotteryFinalizationFacet finalizationFacet = new LotteryFinalizationFacet();
         LotteryViewFacet viewFacet = new LotteryViewFacet();
         OperationsFacet operationsFacet = new OperationsFacet();
+        BuilderFeesFacet builderFeesFacet = new BuilderFeesFacet();
         LotteryFinalizationStateHarness harnessFacet = new LotteryFinalizationStateHarness();
         CrottoDiamondInit initializer = new CrottoDiamondInit();
 
-        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](9);
+        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](10);
         cuts[0] = _facetCut(address(cutFacet), _cutSelectors());
         cuts[1] = _facetCut(address(loupeFacet), _loupeSelectors());
         cuts[2] = _facetCut(address(ownershipFacet), _ownershipSelectors());
@@ -146,6 +149,7 @@ contract LotteryFinalizationTest is Test {
         cuts[6] = _facetCut(address(viewFacet), _viewSelectors());
         cuts[7] = _facetCut(address(operationsFacet), _operationsSelectors());
         cuts[8] = _facetCut(address(harnessFacet), _harnessSelectors());
+        cuts[9] = _facetCut(address(builderFeesFacet), _builderSelectors());
 
         diamond = new CrottoDiamond(
             address(this), cuts, address(initializer), abi.encodeCall(CrottoDiamondInit.initialize, ())
@@ -156,6 +160,7 @@ contract LotteryFinalizationTest is Test {
         finalization = LotteryFinalizationFacet(address(diamond));
         views = LotteryViewFacet(address(diamond));
         operations = OperationsFacet(address(diamond));
+        builderFees = BuilderFeesFacet(address(diamond));
         stateHarness = LotteryFinalizationStateHarness(address(diamond));
         stateHarness.initializeLotteryState(
             address(token), address(weth), address(wrapper), treasury, _configuration(5)
@@ -239,7 +244,64 @@ contract LotteryFinalizationTest is Test {
 
         assertEq(operations.operationsReserve(), 0.4 ether);
         assertEq(address(diamond).balance, 0.8 ether);
-        assertEq(weth.balanceOf(treasury) - treasuryBefore, 0.3 ether);
+        assertEq(weth.balanceOf(treasury) - treasuryBefore, 0.2 ether);
+    }
+
+    function test_ClosedRoundExpiresAfterTimeoutAndRefundsTicketPrice() public {
+        _sellOut();
+        uint256 firstExpirableBlock = block.number + views.round(1).config.vrfTimeoutBlocks + 1;
+        vm.roll(firstExpirableBlock - 1);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LotteryFinalizationFacet.RoundTimeoutNotReached.selector, 1, block.number, firstExpirableBlock
+            )
+        );
+        finalization.expireLottery(1);
+
+        vm.roll(firstExpirableBlock);
+        vm.prank(finalizer);
+        finalization.expireLottery(1);
+        assertEq(uint8(views.round(1).status), uint8(RoundStatus.Expired));
+        assertEq(views.currentRoundId(), 2);
+        assertEq(operations.callerCredit(finalizer), 0.3 ether);
+
+        vm.prank(playerA);
+        (uint256 playerAWeth,) = finalization.claimExpiredRoundRefund(1, playerA, address(0));
+        vm.prank(playerB);
+        (uint256 playerBWeth,) = finalization.claimExpiredRoundRefund(1, playerB, address(0));
+        assertEq(playerAWeth, 2 ether);
+        assertEq(playerBWeth, 3 ether);
+        assertEq(weth.balanceOf(playerA), 2 ether);
+        assertEq(weth.balanceOf(playerB), 3 ether);
+
+        vm.prank(playerA);
+        vm.expectRevert(
+            abi.encodeWithSelector(LotteryFinalizationFacet.RoundNotFinalized.selector, 1, RoundStatus.Expired)
+        );
+        finalization.claimPlayerRewards(1, playerA);
+    }
+
+    function test_BuilderSurchargeRefundsBuyerInsteadOfMaturingBuilderCredit() public {
+        address builder = makeAddr("builder");
+        vm.prank(playerA);
+        builderFees.approveBuilder(builder, 50, false);
+        vm.prank(playerA);
+        ticketing.buyTicketsWithBuilder{value: 2.405 ether}(2, builder, 25, false);
+        vm.prank(playerB);
+        ticketing.buyTickets{value: 3.6 ether}(3);
+
+        vm.roll(block.number + views.round(1).config.vrfTimeoutBlocks + 1);
+        finalization.expireLottery(1);
+        vm.prank(playerA);
+        (uint256 ticketRefund, uint256 builderRefund) = finalization.claimExpiredRoundRefund(1, playerA, playerA);
+        assertEq(ticketRefund, 2 ether);
+        assertEq(builderRefund, 0.005 ether);
+        assertEq(builderFees.builderCredit(builder), 0);
+        vm.prank(builder);
+        vm.expectRevert(
+            abi.encodeWithSelector(BuilderFeesFacet.BuilderRoundNotFinalized.selector, 1, RoundStatus.Expired)
+        );
+        builderFees.settleBuilderFees(1);
     }
 
     function testFuzz_BinarySearchResolvesEveryFrozenTicket(uint256 randomWord) public {
@@ -391,7 +453,7 @@ contract LotteryFinalizationTest is Test {
         configuration.playerRewardRate = PLAYER_REWARD_RATE;
         configuration.ticketTarget = target;
         configuration.maxVrfCost = 0.5 ether;
-        configuration.vrfRetryDelay = 10 minutes;
+        configuration.vrfTimeoutBlocks = 10 minutes;
         configuration.requestCallerReward = 0.1 ether;
         configuration.finalizationCallerReward = 0.3 ether;
         configuration.winnerShareBps = 5_000;
@@ -428,23 +490,26 @@ contract LotteryFinalizationTest is Test {
     }
 
     function _ticketSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](2);
+        selectors = new bytes4[](4);
         selectors[0] = LotteryTicketFacet.buyTickets.selector;
         selectors[1] = LotteryTicketFacet.ticketQuote.selector;
+        selectors[2] = LotteryTicketFacet.buyTicketsWithBuilder.selector;
+        selectors[3] = LotteryTicketFacet.builderTicketQuote.selector;
     }
 
     function _vrfSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](3);
+        selectors = new bytes4[](2);
         selectors[0] = LotteryVRFFacet.requestRandomness.selector;
-        selectors[1] = LotteryVRFFacet.retryRandomness.selector;
-        selectors[2] = LotteryVRFFacet.rawFulfillRandomWords.selector;
+        selectors[1] = LotteryVRFFacet.rawFulfillRandomWords.selector;
     }
 
     function _finalizationSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](3);
+        selectors = new bytes4[](5);
         selectors[0] = LotteryFinalizationFacet.finalizeLottery.selector;
         selectors[1] = LotteryFinalizationFacet.claimWinnings.selector;
         selectors[2] = LotteryFinalizationFacet.claimPlayerRewards.selector;
+        selectors[3] = LotteryFinalizationFacet.expireLottery.selector;
+        selectors[4] = LotteryFinalizationFacet.claimExpiredRoundRefund.selector;
     }
 
     function _viewSelectors() private pure returns (bytes4[] memory selectors) {
@@ -476,5 +541,18 @@ contract LotteryFinalizationTest is Test {
         selectors[2] = LotteryFinalizationStateHarness.setToken.selector;
         selectors[3] = LotteryFinalizationStateHarness.setWeth.selector;
         selectors[4] = LotteryFinalizationStateHarness.aggregateLiabilities.selector;
+    }
+
+    function _builderSelectors() private pure returns (bytes4[] memory selectors) {
+        selectors = new bytes4[](9);
+        selectors[0] = bytes4(keccak256("MAX_BUILDER_FEE_BPS()"));
+        selectors[1] = BuilderFeesFacet.approveBuilder.selector;
+        selectors[2] = BuilderFeesFacet.revokeBuilder.selector;
+        selectors[3] = BuilderFeesFacet.claimBuilderFees.selector;
+        selectors[4] = BuilderFeesFacet.settleBuilderFees.selector;
+        selectors[5] = BuilderFeesFacet.builderApproval.selector;
+        selectors[6] = BuilderFeesFacet.builderCredit.selector;
+        selectors[7] = BuilderFeesFacet.totalBuilderFeeLiability.selector;
+        selectors[8] = BuilderFeesFacet.provisionalBuilderCredit.selector;
     }
 }

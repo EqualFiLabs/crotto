@@ -20,7 +20,7 @@
     "playerRewardRate": "10000000000000000000",
     "ticketTarget": "100",
     "maxVrfCost": "500000000000000000",
-    "vrfRetryDelay": "600",
+    "vrfTimeoutBlocks": "30",
     "requestCallerReward": "100000000000000000",
     "finalizationCallerReward": "100000000000000000",
     "winnerShareBps": "5000",
@@ -43,6 +43,9 @@
     "treasuryShareBps": "1000"
   },
   "buyback": {
-    "slippageBps": "500"
+    "slippageBps": "500",
+    "callerTipBps": "10",
+    "twapWindowSeconds": "1800",
+    "maximumWethChunk": "100000000000000000"
   }
 }

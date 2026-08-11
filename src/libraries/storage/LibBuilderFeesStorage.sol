@@ -12,6 +12,7 @@ library LibBuilderFeesStorage {
         mapping(address player => mapping(address builder => BuilderApproval)) approvals;
         mapping(address builder => uint256 nativeCredit) credits;
         uint256 totalNativeEthLiability;
+        uint256 provisionalNativeEthLiability;
     }
 
     function layout() internal pure returns (Layout storage state) {

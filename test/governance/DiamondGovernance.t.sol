@@ -609,7 +609,9 @@ contract DiamondGovernanceTest is Test {
         nextHook.inputFeeBps = 75;
         nextHook.outputFeeBps = 75;
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setHookConfiguration, (nextHook)));
-        BuybackConfiguration memory nextBuyback = BuybackConfiguration({slippageBps: 750});
+        BuybackConfiguration memory nextBuyback = BuybackConfiguration({
+            slippageBps: 750, callerTipBps: 10, twapWindowSeconds: 30 minutes, maximumWethChunk: 0.1 ether
+        });
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setBuybackConfiguration, (nextBuyback)));
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setTreasuryReceiver, (nextTreasury)));
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setGuardian, (nextGuardian)));
@@ -940,7 +942,9 @@ contract DiamondGovernanceTest is Test {
             hookConfiguration: _validHookConfiguration(),
             treasuryReceiver: treasury,
             guardian: guardian,
-            buybackConfiguration: BuybackConfiguration({slippageBps: 500})
+            buybackConfiguration: BuybackConfiguration({
+                slippageBps: 500, callerTipBps: 10, twapWindowSeconds: 30 minutes, maximumWethChunk: 0.1 ether
+            })
         });
     }
 
@@ -968,7 +972,7 @@ contract DiamondGovernanceTest is Test {
             playerRewardRate: 10 ether,
             ticketTarget: 100,
             maxVrfCost: 0.5 ether,
-            vrfRetryDelay: 10 minutes,
+            vrfTimeoutBlocks: 10 minutes,
             requestCallerReward: 0.1 ether,
             finalizationCallerReward: 0.1 ether,
             winnerShareBps: 5_000,

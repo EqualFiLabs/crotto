@@ -50,8 +50,9 @@ contract CrottoDiamondInit {
 
         LibCrottoValidation.validateImmutableConfiguration(initialization.immutableConfiguration);
         LibCrottoValidation.validateRoundConfiguration(initialization.roundConfiguration);
-        LibCrottoValidation.validateRoundBuybackCapacity(
-            initialization.roundConfiguration, initialization.immutableConfiguration.maxCombinedHookFeeBps
+        LibCrottoValidation.validateVrfTimeout(
+            initialization.roundConfiguration.vrfTimeoutBlocks,
+            initialization.immutableConfiguration.vrfRequestConfirmations
         );
         LibCrottoValidation.validateBootstrapReachability(
             initialization.roundConfiguration, initialization.immutableConfiguration.requiredBootstrapWeth

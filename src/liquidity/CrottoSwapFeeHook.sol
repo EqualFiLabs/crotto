@@ -38,6 +38,13 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
 
     uint8 private constant UNLOCK_COMPOUND = 1;
     bytes32 private constant PERMANENT_LIQUIDITY_SALT = keccak256("crotto.permanent.liquidity");
+    uint16 private constant ORACLE_CARDINALITY = 64;
+    uint32 private constant ORACLE_CHECKPOINT_PERIOD = 1 minutes;
+
+    struct OracleObservation {
+        uint32 timestamp;
+        int256 tickCumulative;
+    }
 
     address public immutable override crottoDiamond;
     address public immutable override activationToken;
@@ -56,6 +63,12 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
     bool private _initializationActive;
     bool private _liquidityModificationActive;
     bool private _entered;
+    OracleObservation[ORACLE_CARDINALITY] private _observations;
+    uint16 private _observationIndex;
+    uint16 private _observationCount;
+    uint32 private _lastOracleTimestamp;
+    int24 private _lastOracleTick;
+    int256 private _tickCumulative;
 
     error ZeroAddress();
     error OnlyCrottoDiamond(address caller);
@@ -82,6 +95,8 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
     error IncompatiblePoolCurrency(Currency currency, uint256 expected, uint256 actual);
     error UnexpectedSettlement(Currency currency, uint256 expected, uint256 actual);
     error UnexpectedTokenAllowance(Currency currency, uint256 remaining);
+    error OracleHistoryUnavailable(uint32 secondsAgo);
+    error InvalidOraclePeriod();
 
     modifier onlyDiamond() {
         if (msg.sender != crottoDiamond) revert OnlyCrottoDiamond(msg.sender);
@@ -173,6 +188,8 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         _initializationActive = true;
         poolManager.initialize(expectedKey, sqrtPriceX96);
         _initializationActive = false;
+        (, int24 initializedTick,,) = poolManager.getSlot0(poolId);
+        _initializeOracle(initializedTick);
         liquidity = _compoundThroughUnlock();
         if (liquidity == 0) revert EmptyInitialLiquidity();
 
@@ -201,6 +218,16 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
 
         emit POLDonated(msg.sender, tokenAmount, wethAmount);
         liquidityAdded = _compoundThroughUnlock();
+    }
+
+    /// @notice Credits finalized round WETH to permanent-liquidity pending without invoking PoolManager.
+    function creditPOLWeth(uint256 wethAmount) external override onlyDiamond nonReentrantHook {
+        _enforceInitialized();
+        if (wethAmount == 0) revert EmptyPOLDonation();
+        LibAssetTransfer.pullExact(weth, msg.sender, wethAmount);
+        _creditPending(Currency.wrap(weth), wethAmount);
+        _assertPendingSolvency(Currency.wrap(weth));
+        emit POLDonated(msg.sender, 0, wethAmount);
     }
 
     function compoundPOL() external override nonReentrantHook returns (uint128 liquidityAdded) {
@@ -237,6 +264,49 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
 
     function lockedLiquidity() external view override returns (uint128) {
         return _lockedLiquidity;
+    }
+
+    function consult(uint32 secondsAgo)
+        external
+        view
+        override
+        returns (int24 arithmeticMeanTick, uint160 sqrtPriceX96)
+    {
+        if (secondsAgo == 0) revert InvalidOraclePeriod();
+        uint32 nowTimestamp = uint32(block.timestamp);
+        if (_observationCount == 0 || secondsAgo > nowTimestamp) revert OracleHistoryUnavailable(secondsAgo);
+        uint32 target = nowTimestamp - secondsAgo;
+        (int256 currentCumulative,) = _currentCumulative(nowTimestamp);
+
+        bool found;
+        OracleObservation memory selected;
+        for (uint16 offset; offset < _observationCount; ++offset) {
+            uint16 index = uint16((uint256(_observationIndex) + ORACLE_CARDINALITY - offset) % ORACLE_CARDINALITY);
+            OracleObservation memory candidate = _observations[index];
+            if (candidate.timestamp <= target) {
+                selected = candidate;
+                found = true;
+                break;
+            }
+        }
+        if (!found || selected.timestamp == nowTimestamp) revert OracleHistoryUnavailable(secondsAgo);
+
+        uint256 elapsed = uint256(nowTimestamp - selected.timestamp);
+        int256 delta = currentCumulative - selected.tickCumulative;
+        int256 mean = delta / int256(elapsed);
+        if (delta < 0 && delta % int256(elapsed) != 0) --mean;
+        if (mean < type(int24).min || mean > type(int24).max) revert OracleHistoryUnavailable(secondsAgo);
+        arithmeticMeanTick = int24(mean);
+        sqrtPriceX96 = TickMath.getSqrtPriceAtTick(arithmeticMeanTick);
+    }
+
+    function oracleState()
+        external
+        view
+        override
+        returns (uint16 observationIndex, uint16 observationCount, uint32 lastTimestamp, int24 lastTick)
+    {
+        return (_observationIndex, _observationCount, _lastOracleTimestamp, _lastOracleTick);
     }
 
     function poolInitialized() external view override returns (bool) {
@@ -318,7 +388,39 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         }
 
         _compoundUnlocked();
+        (, int24 currentTick,,) = poolManager.getSlot0(_canonicalPoolId);
+        _recordOracle(currentTick);
         return (IHooks.afterSwap.selector, charged.toInt128());
+    }
+
+    function _initializeOracle(int24 tick) private {
+        uint32 timestamp = uint32(block.timestamp);
+        _lastOracleTimestamp = timestamp;
+        _lastOracleTick = tick;
+        _observations[0] = OracleObservation({timestamp: timestamp, tickCumulative: 0});
+        _observationIndex = 0;
+        _observationCount = 1;
+        emit OracleObservationRecorded(timestamp, tick, 0);
+    }
+
+    function _recordOracle(int24 tick) private {
+        uint32 timestamp = uint32(block.timestamp);
+        (int256 cumulative, uint32 elapsed) = _currentCumulative(timestamp);
+        _tickCumulative = cumulative;
+        _lastOracleTimestamp = timestamp;
+        _lastOracleTick = tick;
+        OracleObservation memory latest = _observations[_observationIndex];
+        if (elapsed == 0 || timestamp - latest.timestamp < ORACLE_CHECKPOINT_PERIOD) return;
+
+        _observationIndex = uint16((uint256(_observationIndex) + 1) % ORACLE_CARDINALITY);
+        _observations[_observationIndex] = OracleObservation({timestamp: timestamp, tickCumulative: cumulative});
+        if (_observationCount < ORACLE_CARDINALITY) ++_observationCount;
+        emit OracleObservationRecorded(timestamp, tick, cumulative);
+    }
+
+    function _currentCumulative(uint32 timestamp) private view returns (int256 cumulative, uint32 elapsed) {
+        elapsed = timestamp - _lastOracleTimestamp;
+        cumulative = _tickCumulative + int256(_lastOracleTick) * int256(uint256(elapsed));
     }
 
     function _allocateAndRoute(Currency currency, uint256 charged, bool inputLeg) private {

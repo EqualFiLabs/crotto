@@ -64,9 +64,13 @@ contract EthereumDeploymentToolingTest is Test {
         assertEq(configuration.round.treasuryShareBps, 1_000);
         assertEq(configuration.round.buybackShareBps, 1_000);
         assertEq(configuration.round.operationsReserveCap, 1 ether);
+        assertEq(configuration.round.vrfTimeoutBlocks, 30);
         assertEq(configuration.hook.inputFeeBps, 50);
         assertEq(configuration.hook.outputFeeBps, 50);
         assertEq(configuration.buyback.slippageBps, 500);
+        assertEq(configuration.buyback.callerTipBps, 10);
+        assertEq(configuration.buyback.twapWindowSeconds, 30 minutes);
+        assertEq(configuration.buyback.maximumWethChunk, 0.1 ether);
     }
 
     function test_EthereumTargetsPinVerifiedDependencies() public view {
@@ -133,6 +137,6 @@ contract EthereumDeploymentToolingTest is Test {
             }
         }
 
-        assertEq(seenCount, 82);
+        assertEq(seenCount, 90);
     }
 }

@@ -25,16 +25,13 @@ contract ValidationHarness {
         LibCrottoValidation.validateRoundConfiguration(configuration);
     }
 
-    function validateRoundBuybackCapacity(RoundConfiguration calldata configuration, uint256 maximumInputFeeBps)
-        external
-        pure
-    {
-        if (maximumInputFeeBps > type(uint16).max) revert HarnessValueOutOfBounds(maximumInputFeeBps);
-        LibCrottoValidation.validateRoundBuybackCapacity(configuration, SafeCast.toUint16(maximumInputFeeBps));
-    }
-
     function validateBuybackConfiguration(BuybackConfiguration calldata configuration) external pure {
         LibCrottoValidation.validateBuybackConfiguration(configuration);
+    }
+
+    function validateVrfTimeout(uint256 timeoutBlocks, uint256 requestConfirmations) external pure {
+        if (requestConfirmations > type(uint16).max) revert HarnessValueOutOfBounds(requestConfirmations);
+        LibCrottoValidation.validateVrfTimeout(timeoutBlocks, SafeCast.toUint16(requestConfirmations));
     }
 
     function validateBootstrapReachability(RoundConfiguration calldata configuration, uint256 threshold) external pure {
@@ -166,6 +163,11 @@ contract ConfigurationValidationTest is Test {
         assertEq(CrottoConstants.INITIAL_HOOK_NFT_SHARE_BPS, 4_000);
         assertEq(CrottoConstants.INITIAL_HOOK_TREASURY_SHARE_BPS, 1_000);
         assertEq(CrottoConstants.INITIAL_BUYBACK_SLIPPAGE_BPS, 500);
+        assertEq(CrottoConstants.INITIAL_BUYBACK_CALLER_TIP_BPS, 10);
+        assertEq(CrottoConstants.MAX_BUYBACK_CALLER_TIP_BPS, 100);
+        assertEq(CrottoConstants.INITIAL_BUYBACK_TWAP_WINDOW_SECONDS, 30 minutes);
+        assertEq(CrottoConstants.INITIAL_BUYBACK_MAXIMUM_WETH_CHUNK, 0.1 ether);
+        assertEq(CrottoConstants.INITIAL_VRF_TIMEOUT_BLOCKS, 30);
 
         assertEq(CrottoConstants.PAUSE_TICKET_PURCHASES, 1);
         assertEq(CrottoConstants.PAUSE_NFT_ACTIVATIONS, 2);
@@ -176,9 +178,9 @@ contract ConfigurationValidationTest is Test {
     function test_ApprovedConfigurationsValidate() public view {
         harness.validateImmutableConfiguration(_validImmutableConfiguration());
         harness.validateRoundConfiguration(_validRoundConfiguration());
-        harness.validateRoundBuybackCapacity(_validRoundConfiguration(), 200);
         harness.validateBootstrapReachability(_validRoundConfiguration(), 40 ether);
         harness.validateBuybackConfiguration(_validBuybackConfiguration());
+        harness.validateVrfTimeout(_validRoundConfiguration().vrfTimeoutBlocks, 3);
         harness.validateActivationConfiguration(_validActivationConfiguration(), 10_000);
         harness.validateHookConfiguration(_validHookConfiguration(), 200);
         harness.validateTreasuryReceiver(address(0x1007), _validImmutableConfiguration());
@@ -478,34 +480,59 @@ contract ConfigurationValidationTest is Test {
         harness.validateHookConfiguration(configuration, 99);
     }
 
-    function test_RevertWhen_BuybackCannotProduceSpecifiedInput() public {
-        RoundConfiguration memory configuration = _validRoundConfiguration();
-        configuration.ticketPrice = 9;
-
-        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InsufficientBuybackExecutionAmount.selector, 0, 200));
-        harness.validateRoundBuybackCapacity(configuration, 200);
-    }
-
-    function test_RevertWhen_MaximumInputFeeConsumesTheBuybackBudget() public {
-        RoundConfiguration memory configuration = _validRoundConfiguration();
-        uint256 grossWeth = configuration.ticketPrice * configuration.buybackShareBps / CrottoConstants.BPS;
-
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                LibCrottoValidation.InsufficientBuybackExecutionAmount.selector, grossWeth, uint16(CrottoConstants.BPS)
-            )
-        );
-        harness.validateRoundBuybackCapacity(configuration, CrottoConstants.BPS);
-    }
-
     function test_RevertWhen_BuybackSlippageIsZeroOrComplete() public {
         vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidBuybackSlippage.selector, 0));
-        harness.validateBuybackConfiguration(BuybackConfiguration({slippageBps: 0}));
+        harness.validateBuybackConfiguration(
+            BuybackConfiguration({
+                slippageBps: 0, callerTipBps: 10, twapWindowSeconds: 30 minutes, maximumWethChunk: 0.1 ether
+            })
+        );
 
         vm.expectRevert(
             abi.encodeWithSelector(LibCrottoValidation.InvalidBuybackSlippage.selector, CrottoConstants.BPS)
         );
-        harness.validateBuybackConfiguration(BuybackConfiguration({slippageBps: uint16(CrottoConstants.BPS)}));
+        harness.validateBuybackConfiguration(
+            BuybackConfiguration({
+                slippageBps: uint16(CrottoConstants.BPS),
+                callerTipBps: 10,
+                twapWindowSeconds: 30 minutes,
+                maximumWethChunk: 0.1 ether
+            })
+        );
+    }
+
+    function test_RevertWhen_BuybackTipWindowOrChunkIsOutOfBounds() public {
+        BuybackConfiguration memory configuration = _validBuybackConfiguration();
+        configuration.callerTipBps = CrottoConstants.MAX_BUYBACK_CALLER_TIP_BPS + 1;
+        vm.expectRevert(
+            abi.encodeWithSelector(LibCrottoValidation.InvalidBuybackCallerTip.selector, configuration.callerTipBps)
+        );
+        harness.validateBuybackConfiguration(configuration);
+
+        configuration = _validBuybackConfiguration();
+        configuration.twapWindowSeconds = CrottoConstants.MIN_BUYBACK_TWAP_WINDOW_SECONDS - 1;
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.InvalidBuybackTwapWindow.selector, configuration.twapWindowSeconds
+            )
+        );
+        harness.validateBuybackConfiguration(configuration);
+
+        configuration = _validBuybackConfiguration();
+        configuration.maximumWethChunk = 0;
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidBuybackMaximumChunk.selector, 0));
+        harness.validateBuybackConfiguration(configuration);
+    }
+
+    function test_VrfTimeoutUsesInclusiveBounds() public {
+        harness.validateVrfTimeout(5, 3);
+        harness.validateVrfTimeout(CrottoConstants.MAX_VRF_TIMEOUT_BLOCKS, 3);
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidVrfTimeout.selector, 4, 5, 7_200));
+        harness.validateVrfTimeout(4, 3);
+
+        vm.expectRevert(abi.encodeWithSelector(LibCrottoValidation.InvalidVrfTimeout.selector, 7_201, 5, 7_200));
+        harness.validateVrfTimeout(7_201, 3);
     }
 
     function test_RevertWhen_CanonicalSwapPauseBitIsUsed() public {
@@ -561,7 +588,7 @@ contract ConfigurationValidationTest is Test {
             playerRewardRate: 100 ether,
             ticketTarget: 100,
             maxVrfCost: 0.2 ether,
-            vrfRetryDelay: 10 minutes,
+            vrfTimeoutBlocks: 10 minutes,
             requestCallerReward: 0.01 ether,
             finalizationCallerReward: 0.01 ether,
             winnerShareBps: CrottoConstants.INITIAL_LOTTERY_WINNER_SHARE_BPS,
@@ -591,6 +618,11 @@ contract ConfigurationValidationTest is Test {
     }
 
     function _validBuybackConfiguration() private pure returns (BuybackConfiguration memory configuration) {
-        configuration.slippageBps = CrottoConstants.INITIAL_BUYBACK_SLIPPAGE_BPS;
+        configuration = BuybackConfiguration({
+            slippageBps: CrottoConstants.INITIAL_BUYBACK_SLIPPAGE_BPS,
+            callerTipBps: CrottoConstants.INITIAL_BUYBACK_CALLER_TIP_BPS,
+            twapWindowSeconds: CrottoConstants.INITIAL_BUYBACK_TWAP_WINDOW_SECONDS,
+            maximumWethChunk: CrottoConstants.INITIAL_BUYBACK_MAXIMUM_WETH_CHUNK
+        });
     }
 }

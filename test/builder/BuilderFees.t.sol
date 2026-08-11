@@ -4,13 +4,9 @@ pragma solidity 0.8.33;
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {BuilderFeesFacet} from "../../src/diamond/facets/BuilderFeesFacet.sol";
-import {LotteryFinalizationFacet} from "../../src/diamond/facets/LotteryFinalizationFacet.sol";
 import {LotteryTicketFacet} from "../../src/diamond/facets/LotteryTicketFacet.sol";
-import {LotteryVRFFacet} from "../../src/diamond/facets/LotteryVRFFacet.sol";
-import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
-import {LibAutomaticBuyback} from "../../src/libraries/LibAutomaticBuyback.sol";
-import {BuilderApproval, BuilderTicketQuote, BuybackConfiguration, Round} from "../../src/types/CrottoTypes.sol";
+import {BuilderApproval, BuilderTicketQuote, RoundSettlement} from "../../src/types/CrottoTypes.sol";
 import {AutomaticTicketBuybackFixture} from "../liquidity/AutomaticTicketBuyback.t.sol";
 
 contract RejectNativeBuilderReceiver {
@@ -78,7 +74,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
 
     function test_BuilderPurchaseAccruesOnlySurchargeAndPreservesProtocolEconomics() public {
         _buyTickets(1);
-        Round memory beforeRound = views.round(1);
+        RoundSettlement memory beforeSettlement = views.roundSettlement(1);
         uint256 bootstrapBefore = pol.bootstrapPolWeth();
         uint256 treasuryWethBefore = weth.balanceOf(treasury);
         uint256 diamondWethBefore = weth.balanceOf(address(diamond));
@@ -97,12 +93,14 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, builder, 50, false);
 
-        Round memory afterRound = views.round(1);
-        assertEq(afterRound.winnerPoolWeth - beforeRound.winnerPoolWeth, 0.5 ether);
-        assertEq(pol.bootstrapPolWeth() - bootstrapBefore, 0.4 ether);
-        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.1 ether);
-        assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 0.9 ether);
-        assertEq(builders.builderCredit(builder), 0.005 ether);
+        RoundSettlement memory afterSettlement = views.roundSettlement(1);
+        assertEq(afterSettlement.winnerWeth - beforeSettlement.winnerWeth, 0.5 ether);
+        assertEq(afterSettlement.bootstrapPolWeth - beforeSettlement.bootstrapPolWeth, 0.4 ether);
+        assertEq(pol.bootstrapPolWeth() - bootstrapBefore, 0);
+        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0);
+        assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 1 ether);
+        assertEq(builders.builderCredit(builder), 0);
+        assertEq(builders.provisionalBuilderCredit(1, builder), 0.005 ether);
         assertEq(builders.totalBuilderFeeLiability(), 0.005 ether);
         assertEq(address(diamond).balance, 2 * OPERATIONS_FEE + 0.005 ether);
         assertEq(views.playerTickets(1, player), 2);
@@ -123,10 +121,10 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, builder, 50, false);
 
-        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.11 ether);
-        assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 0.9 ether);
+        assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.01 ether);
+        assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 1 ether);
         assertEq(address(diamond).balance, 0.505 ether);
-        assertEq(builders.builderCredit(builder), 0.005 ether);
+        assertEq(builders.provisionalBuilderCredit(1, builder), 0.005 ether);
         assertEq(builders.totalBuilderFeeLiability(), 0.005 ether);
     }
 
@@ -143,7 +141,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         assertEq(views.playerTickets(1, player), 2);
         assertEq(views.rewardTickets(1, player), 2);
         assertEq(views.rewardTickets(1, builder), 0);
-        assertEq(builders.builderCredit(builder), 0.004 ether);
+        assertEq(builders.provisionalBuilderCredit(1, builder), 0.004 ether);
     }
 
     function test_RevocationDoesNotChangeHistoricalRewardAssignment() public {
@@ -257,7 +255,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         lottery.buyTicketsWithBuilder{value: total}(1, player, 50, true);
 
         assertEq(balanceBefore - player.balance, total);
-        assertEq(builders.builderCredit(player), 0.005 ether);
+        assertEq(builders.provisionalBuilderCredit(1, player), 0.005 ether);
         assertEq(views.playerTickets(1, player), 1);
         assertEq(views.rewardTickets(1, player), 1);
     }
@@ -268,8 +266,12 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         _approveAndBuy(player, builder, 50, 1, false);
         _approveAndBuy(secondPlayer, builder, 50, 2, false);
         uint256 expectedCredit = 0.015 ether;
-        assertEq(builders.builderCredit(builder), expectedCredit);
+        assertEq(builders.provisionalBuilderCredit(1, builder), expectedCredit);
         assertEq(builders.totalBuilderFeeLiability(), expectedCredit);
+
+        _finalizeCurrentRound();
+        vm.prank(builder);
+        assertEq(builders.settleBuilderFees(1), expectedCredit);
 
         uint256 receiverBefore = receiver.balance;
         uint256 diamondBefore = address(diamond).balance;
@@ -288,6 +290,9 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
 
     function test_FailedClaimRestoresCreditLiabilityAndDiamondBalance() public {
         _approveAndBuy(player, builder, 50, 1, false);
+        _finalizeCurrentRound();
+        vm.prank(builder);
+        builders.settleBuilderFees(1);
         RejectNativeBuilderReceiver rejecting = new RejectNativeBuilderReceiver();
         uint256 diamondBefore = address(diamond).balance;
 
@@ -324,21 +329,21 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         builders.claimBuilderFees(address(diamond));
     }
 
-    function test_PostPolBuybackFailureRollsBackBuilderAccrual() public {
+    function test_PostPolPurchaseDoesNotDependOnBuybackExecution() public {
         _bootstrapPOL();
         vm.prank(player);
         builders.approveBuilder(builder, 50, false);
-        governance.setBuybackConfiguration(BuybackConfiguration({slippageBps: 1}));
-        uint256 ticketCountBefore = views.round(1).ticketCount;
+        uint256 roundId = views.currentRoundId();
+        uint256 ticketCountBefore = views.round(roundId).ticketCount;
         uint256 total = TICKET_PRICE * 25 + OPERATIONS_FEE * 25 + 0.125 ether;
 
         vm.prank(player);
-        vm.expectPartialRevert(LibAutomaticBuyback.UnexpectedWethDebt.selector);
         lottery.buyTicketsWithBuilder{value: total}(25, builder, 50, false);
 
-        assertEq(views.round(1).ticketCount, ticketCountBefore);
+        assertEq(views.round(roundId).ticketCount, ticketCountBefore + 25);
         assertEq(builders.builderCredit(builder), 0);
-        assertEq(builders.totalBuilderFeeLiability(), 0);
+        assertEq(builders.provisionalBuilderCredit(roundId, builder), 0.125 ether);
+        assertEq(builders.totalBuilderFeeLiability(), 0.125 ether);
     }
 
     function test_WethFailureRollsBackBuilderAccrualAndRewardAssignment() public {
@@ -367,12 +372,11 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         lottery.buyTicketsWithBuilder{value: total}(1, address(rejectingBuilder), 50, true);
 
-        assertEq(builders.builderCredit(address(rejectingBuilder)), 0.005 ether);
+        assertEq(builders.provisionalBuilderCredit(1, address(rejectingBuilder)), 0.005 ether);
         assertEq(views.rewardTickets(1, address(rejectingBuilder)), 1);
     }
 
     function test_RedirectedRewardIsClaimedByBuilderWithoutChangingWinnerOwnership() public {
-        _installLotteryLifecycle();
         vm.prank(player);
         builders.approveBuilder(builder, 0, true);
         vm.prank(player);
@@ -409,7 +413,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         lottery.buyTicketsWithBuilder{value: quote.totalEth}(quantity, builder, boundedFeeBps, false);
         assertEq(playerBefore - player.balance, quote.totalEth);
-        assertEq(builders.builderCredit(builder), expectedFee);
+        assertEq(builders.provisionalBuilderCredit(1, builder), expectedFee);
         assertEq(views.rewardTickets(1, player), quantity);
     }
 
@@ -422,15 +426,13 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         lottery.buyTicketsWithBuilder{value: quote.totalEth}(quantity, targetBuilder, bps, redirect);
     }
 
-    function _installLotteryLifecycle() private {
-        LotteryVRFFacet vrfFacet = new LotteryVRFFacet();
-        LotteryFinalizationFacet finalizationFacet = new LotteryFinalizationFacet();
-        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](2);
-        cuts[0] = _facetCut(address(vrfFacet), _artifactSelectors("out/LotteryVRFFacet.sol/LotteryVRFFacet.json"));
-        cuts[1] = _facetCut(
-            address(finalizationFacet),
-            _artifactSelectors("out/LotteryFinalizationFacet.sol/LotteryFinalizationFacet.json")
-        );
-        IDiamondCut(address(diamond)).diamondCut(cuts, address(0), "");
+    function _finalizeCurrentRound() private {
+        uint256 remaining = TICKET_TARGET - views.round(1).ticketCount;
+        if (remaining != 0) _buyTickets(remaining);
+        vm.prank(receiver);
+        uint256 requestId = lottery.requestRandomness(1);
+        vrfWrapper.fulfill(requestId, 0);
+        vm.prank(receiver);
+        lottery.finalizeLottery(1);
     }
 }

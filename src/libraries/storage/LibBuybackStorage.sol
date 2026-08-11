@@ -11,6 +11,9 @@ library LibBuybackStorage {
         uint256 __reservedLegacyTotalTicketsSold;
         uint256 __reservedLegacyTicketsAtLastBuyback;
         bytes32 activeExecutionHash;
+        uint256 totalWethPurchased;
+        uint256 totalTokenReceived;
+        uint256 executionCount;
     }
 
     function layout() internal pure returns (Layout storage state) {

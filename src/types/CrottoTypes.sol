@@ -9,14 +9,17 @@ enum RoundStatus {
     Closed,
     VRFPending,
     RandomReady,
-    Finalized
+    Finalized,
+    Expired
 }
 
 /// @notice Permissionless lifecycle actions that earn native ETH caller credits.
 enum CallerAction {
     RandomnessRequest,
+    // Reserved to preserve historical caller-credit key numbering; no retry selector exists.
     RandomnessRetry,
-    Finalization
+    Finalization,
+    Expiration
 }
 
 /// @notice Reasons a VRF fulfillment may be safely ignored without reverting.
@@ -24,7 +27,8 @@ enum IgnoredFulfillmentReason {
     UnknownRequest,
     RoundNotPending,
     RandomnessAlreadyAccepted,
-    InvalidWordCount
+    InvalidWordCount,
+    FulfillmentTimedOut
 }
 
 /// @notice Deployment-time values that governance cannot change.
@@ -52,7 +56,7 @@ struct RoundConfiguration {
     uint256 playerRewardRate;
     uint256 ticketTarget;
     uint256 maxVrfCost;
-    uint256 vrfRetryDelay;
+    uint256 vrfTimeoutBlocks;
     uint256 requestCallerReward;
     uint256 finalizationCallerReward;
     uint16 winnerShareBps;
@@ -80,9 +84,12 @@ struct HookConfiguration {
     uint16 treasuryShareBps;
 }
 
-/// @notice Live governed execution tolerance for automatic ticket buybacks.
+/// @notice Live governed execution parameters for permissionless pending buybacks.
 struct BuybackConfiguration {
     uint16 slippageBps;
+    uint16 callerTipBps;
+    uint32 twapWindowSeconds;
+    uint128 maximumWethChunk;
 }
 
 /// @notice One player's independent fee and ticket-reward permissions for a Builder.
@@ -123,9 +130,34 @@ struct Round {
     uint256 acceptedRandomWord;
     uint256 winningTicket;
     address winner;
-    uint64 latestRequestAt;
+    uint64 latestRequestBlock;
     uint32 requestAttempts;
     bool prizeClaimed;
+    uint64 closedAtBlock;
+}
+
+/// @notice Deferred ticket-value routing and refundable balances for one round.
+struct RoundSettlement {
+    uint256 ticketEscrowWeth;
+    uint256 winnerWeth;
+    uint256 rewardNftWeth;
+    uint256 bootstrapPolWeth;
+    uint256 treasuryWeth;
+    uint256 buybackWeth;
+    uint256 provisionalNftIndexRay;
+    uint256 provisionalNftRemainder;
+    uint256 finalizedNftIndexRay;
+    uint256 builderFeeEth;
+    uint256 provisionalNftCrystallizedWeth;
+}
+
+/// @notice Lazy purchase-time Reward NFT eligibility carried across round resolution.
+struct ProvisionalNFTRewardPosition {
+    uint256 finalizedCheckpointRay;
+    uint256 provisionalRoundId;
+    uint256 provisionalCheckpointRay;
+    uint256 provisionalClaimableWeth;
+    uint256 claimableWeth;
 }
 
 /// @notice One purchase represented as the cumulative exclusive end and buyer.
@@ -171,6 +203,11 @@ struct ProtocolAccountingView {
     uint256 playerTokenLiability;
     uint256 rewardNftTokenLiability;
     uint256 vaultBackingToken;
+    uint256 ticketEscrowWeth;
+    uint256 expiredTicketRefundWeth;
+    uint256 pendingBuybackWeth;
+    uint256 provisionalBuilderEth;
+    uint256 expiredBuilderRefundEth;
 }
 
 /// @notice NFTVault supply, inventory, and TOKEN backing state.

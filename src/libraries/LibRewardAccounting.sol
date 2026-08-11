@@ -5,6 +5,7 @@ import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {ICrottoRewards} from "../interfaces/ICrottoRewards.sol";
 import {CrottoConstants} from "./CrottoConstants.sol";
 import {LibAssetTransfer} from "./LibAssetTransfer.sol";
+import {LibProvisionalRewardAccounting} from "./LibProvisionalRewardAccounting.sol";
 import {LibGovernanceStorage} from "./storage/LibGovernanceStorage.sol";
 import {LibRewardsStorage} from "./storage/LibRewardsStorage.sol";
 import {NFTRewardPosition, RewardBook} from "../types/CrottoTypes.sol";
@@ -36,6 +37,8 @@ library LibRewardAccounting {
         NFTRewardPosition storage position = state.positions[tokenId];
         uint256 weight = position.storedWeight;
 
+        LibProvisionalRewardAccounting.settleFinalized(tokenId, weight);
+
         if (weight != 0) {
             wethAmount = _settleBook(state.wethBook, weight, position.wethCheckpointRay);
             tokenAmount = _settleBook(state.tokenBook, weight, position.tokenCheckpointRay);
@@ -54,6 +57,7 @@ library LibRewardAccounting {
         NFTRewardPosition storage position = state.positions[tokenId];
         wethAmount = position.claimableWeth;
         tokenAmount = position.claimableToken;
+        wethAmount += LibProvisionalRewardAccounting.pending(tokenId, position.storedWeight);
 
         uint256 weight = position.storedWeight;
         if (weight == 0) return (wethAmount, tokenAmount);
@@ -73,9 +77,9 @@ library LibRewardAccounting {
         settle(tokenId);
         NFTRewardPosition storage position = state.positions[tokenId];
         amount = position.claimableWeth;
-        if (amount == 0) return 0;
         position.claimableWeth = 0;
-        state.wethBook.totalClaimable -= amount;
+        if (amount != 0) state.wethBook.totalClaimable -= amount;
+        amount += LibProvisionalRewardAccounting.consumeClaim(tokenId, position.storedWeight);
     }
 
     function consumeTokenClaim(uint256 tokenId) internal returns (uint256 amount) {
@@ -98,6 +102,7 @@ library LibRewardAccounting {
         settle(tokenId);
 
         previousWeight = position.storedWeight;
+        LibProvisionalRewardAccounting.beforeWeightChange(tokenId, previousWeight);
         if (previousWeight != newWeight) {
             state.totalActiveWeight = state.totalActiveWeight - previousWeight + newWeight;
             // A remainder is expressed against the denominator that produced it and cannot
@@ -111,8 +116,12 @@ library LibRewardAccounting {
         position.storedWeight = newWeight;
         position.wethCheckpointRay = state.wethBook.indexRay;
         position.tokenCheckpointRay = state.tokenBook.indexRay;
+        LibProvisionalRewardAccounting.afterWeightChange(tokenId, previousWeight != newWeight);
 
-        if (state.totalActiveWeight == 0) _finishEpoch(state);
+        if (state.totalActiveWeight == 0) {
+            _finishEpoch(state);
+            LibProvisionalRewardAccounting.finishEpoch();
+        }
     }
 
     /// @dev Initializes or refreshes an ineligible position without changing attached claims.

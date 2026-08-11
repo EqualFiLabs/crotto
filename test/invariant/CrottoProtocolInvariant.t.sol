@@ -14,12 +14,8 @@ import {PoolId} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {SwapParams} from "@uniswap/v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "@uniswap/v4-core/src/libraries/TickMath.sol";
-import {LotteryFinalizationFacet} from "../../src/diamond/facets/LotteryFinalizationFacet.sol";
-import {LotteryVRFFacet} from "../../src/diamond/facets/LotteryVRFFacet.sol";
 import {NFTVaultFacet} from "../../src/diamond/facets/NFTVaultFacet.sol";
 import {OperationsFacet} from "../../src/diamond/facets/OperationsFacet.sol";
-import {RewardActivationFacet} from "../../src/diamond/facets/RewardActivationFacet.sol";
-import {RewardClaimsFacet} from "../../src/diamond/facets/RewardClaimsFacet.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
@@ -37,6 +33,7 @@ import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceSto
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
+import {LibRoundSettlementStorage} from "../../src/libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
 import {LibVaultStorage} from "../../src/libraries/storage/LibVaultStorage.sol";
 import {ActivationToken} from "../../src/token/ActivationToken.sol";
@@ -64,6 +61,10 @@ struct InvariantAccountingView {
     uint256 operationsEth;
     uint256 callerCreditsEth;
     uint256 builderCreditsEth;
+    uint256 ticketEscrowWeth;
+    uint256 expiredTicketRefundWeth;
+    uint256 pendingBuybackWeth;
+    uint256 lotteryNftWeth;
 }
 
 interface IInvariantProbe {
@@ -84,6 +85,7 @@ contract InvariantProbeFacet {
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         LibRewardsStorage.Layout storage rewards = LibRewardsStorage.layout();
         LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
+        LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
         accounting = InvariantAccountingView({
             winnerWeth: lottery.totalWinnerPoolWethLiability,
             playerToken: lottery.totalPlayerTokenLiability,
@@ -93,7 +95,11 @@ contract InvariantProbeFacet {
             bootstrapWeth: LibPOLStorage.layout().bootstrapWeth,
             operationsEth: treasury.operationsReserveEth,
             callerCreditsEth: treasury.totalCallerCreditsEth,
-            builderCreditsEth: LibBuilderFeesStorage.layout().totalNativeEthLiability
+            builderCreditsEth: LibBuilderFeesStorage.layout().totalNativeEthLiability,
+            ticketEscrowWeth: settlements.activeTicketEscrowWeth,
+            expiredTicketRefundWeth: settlements.expiredTicketRefundWeth,
+            pendingBuybackWeth: settlements.pendingBuybackWeth,
+            lotteryNftWeth: settlements.lotteryNftWethLiability
         });
     }
 
@@ -170,6 +176,8 @@ contract CrottoProtocolHandler is Test {
     mapping(uint256 roundId => uint256 count) public winnerClaimCount;
     mapping(uint256 roundId => mapping(address player => uint256 count)) public playerClaimCount;
     mapping(address builder => uint256 credit) public modeledBuilderCredits;
+    mapping(uint256 roundId => mapping(address builder => uint256 credit)) public modeledProvisionalBuilderCredits;
+    mapping(uint256 roundId => mapping(address buyer => uint256 refund)) public modeledBuilderRefunds;
     uint256 public modeledBuilderLiability;
 
     uint256 public playerRewardsMinted;
@@ -238,8 +246,6 @@ contract CrottoProtocolHandler is Test {
         uint256 payment = (current.config.ticketPrice + current.config.ticketOperationsFee) * quantity;
         if (actor.balance < payment) return;
 
-        bool initializedBefore = pol.polInitialized();
-        uint256 bootstrapBefore = pol.bootstrapPolWeth();
         InvariantAccountingView memory accountingBefore = probe.protocolAccountingProbe();
         uint256 nativeBefore = diamond.balance;
         bytes32 beforeDigest = _purchaseDigest(roundId);
@@ -259,11 +265,9 @@ contract CrottoProtocolHandler is Test {
         InvariantAccountingView memory accountingAfter = probe.protocolAccountingProbe();
         if (
             accountingAfter.operationsEth != accountingBefore.operationsEth + reserveContribution
-                || diamond.balance != nativeBefore + reserveContribution
+                || accountingAfter.ticketEscrowWeth != accountingBefore.ticketEscrowWeth + ticketValue
+                || diamond.balance != nativeBefore + reserveContribution || _containsCanonicalSwap(logs)
         ) operationsRoutingViolation = true;
-        uint256 expectedBuyback = ticketValue * current.config.buybackShareBps / BPS;
-        if (initializedBefore) _checkBuybackLogs(logs, roundId, actor, expectedBuyback);
-        else if (pol.bootstrapPolWeth() < bootstrapBefore + expectedBuyback) buybackBudgetViolation = true;
         _observeLiquidity();
     }
 
@@ -312,7 +316,8 @@ contract CrottoProtocolHandler is Test {
             if (_purchaseDigest(roundId) != beforeDigest) purchaseRollbackViolation = true;
             return;
         }
-        modeledBuilderCredits[builder] += builderFee;
+        modeledProvisionalBuilderCredits[roundId][builder] += builderFee;
+        modeledBuilderRefunds[roundId][buyer] += builderFee;
         modeledBuilderLiability += builderFee;
         uint256 operationsFee = current.config.ticketOperationsFee * quantity;
         uint256 reserveContribution =
@@ -320,6 +325,7 @@ contract CrottoProtocolHandler is Test {
         InvariantAccountingView memory accountingAfter = probe.protocolAccountingProbe();
         if (
             accountingAfter.operationsEth != accountingBefore.operationsEth + reserveContribution
+                || accountingAfter.ticketEscrowWeth != accountingBefore.ticketEscrowWeth + ticketValue
                 || diamond.balance != nativeBefore + reserveContribution + builderFee
         ) operationsRoutingViolation = true;
         _observeLiquidity();
@@ -362,6 +368,33 @@ contract CrottoProtocolHandler is Test {
         } catch {}
     }
 
+    function settleBuilderFees(uint256 roundSeed, uint256 builderSeed) external {
+        uint256 roundId = _boundedRound(roundSeed);
+        if (roundId == 0) return;
+        address builder = _actor(builderSeed);
+        uint256 expected = modeledProvisionalBuilderCredits[roundId][builder];
+        if (expected == 0) return;
+        vm.prank(builder);
+        try builders.settleBuilderFees(roundId) returns (uint256 amount) {
+            if (amount != expected) purchaseRollbackViolation = true;
+            modeledProvisionalBuilderCredits[roundId][builder] = 0;
+            modeledBuilderCredits[builder] += amount;
+        } catch {}
+    }
+
+    function claimExpiredRoundRefund(uint256 roundSeed, uint256 actorSeed) external {
+        uint256 roundId = _boundedRound(roundSeed);
+        if (roundId == 0 || _round(roundId).status != RoundStatus.Expired) return;
+        address actor = _actor(actorSeed);
+        uint256 expectedBuilderRefund = modeledBuilderRefunds[roundId][actor];
+        vm.prank(actor);
+        try lottery.claimExpiredRoundRefund(roundId, actor, actor) returns (uint256, uint256 builderRefund) {
+            if (builderRefund != expectedBuilderRefund) purchaseRollbackViolation = true;
+            modeledBuilderRefunds[roundId][actor] = 0;
+            modeledBuilderLiability -= builderRefund;
+        } catch {}
+    }
+
     function initializePOL(uint256) external {
         if (!pol.canInitializePOL()) return;
         uint256 supplyBefore = token.totalSupply();
@@ -383,14 +416,16 @@ contract CrottoProtocolHandler is Test {
         } catch {}
     }
 
-    function retryRandomness(uint256 actorSeed) external {
+    function expireLottery(uint256 actorSeed) external {
         uint256 roundId = _currentRoundId();
         Round memory current = _round(roundId);
-        if (current.status != RoundStatus.VRFPending) return;
-        vm.warp(block.timestamp + current.config.vrfRetryDelay + 1);
+        if (current.status != RoundStatus.Closed && current.status != RoundStatus.VRFPending) return;
+        vm.roll(block.number + current.config.vrfTimeoutBlocks + 1);
         vm.prank(_actor(actorSeed));
-        try lottery.retryRandomness(roundId) returns (uint256 requestId) {
-            requestIds.push(requestId);
+        try lottery.expireLottery(roundId) {
+            for (uint256 i; i < actors.length; ++i) {
+                modeledProvisionalBuilderCredits[roundId][actors[i]] = 0;
+            }
         } catch {}
     }
 
@@ -594,7 +629,14 @@ contract CrottoProtocolHandler is Test {
     }
 
     function setBuybackSlippage(uint256 slippageSeed) external {
-        governance.setBuybackConfiguration(BuybackConfiguration({slippageBps: uint16(bound(slippageSeed, 1, 9_999))}));
+        governance.setBuybackConfiguration(
+            BuybackConfiguration({
+                slippageBps: uint16(bound(slippageSeed, 1, 9_999)),
+                callerTipBps: 10,
+                twapWindowSeconds: 30 minutes,
+                maximumWethChunk: 0.1 ether
+            })
+        );
     }
 
     function setHookConfiguration(uint256 inputSeed, uint256 outputSeed, uint256 polSeed, uint256 nftSeed) external {
@@ -687,6 +729,15 @@ contract CrottoProtocolHandler is Test {
         lastLockedLiquidity = current;
     }
 
+    function _containsCanonicalSwap(Vm.Log[] memory logs) private view returns (bool) {
+        for (uint256 i; i < logs.length; ++i) {
+            if (logs[i].emitter == manager && logs[i].topics.length != 0 && logs[i].topics[0] == SWAP_EVENT) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     function _currentRoundId() private view returns (uint256) {
         (bool success, bytes memory data) = diamond.staticcall(abi.encodeWithSignature("currentRoundId()"));
         return success ? abi.decode(data, (uint256)) : 0;
@@ -771,11 +822,11 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         handler.seedActors();
         IERC173(address(diamond)).transferOwnership(address(handler));
 
-        bytes4[] memory selectors = new bytes4[](31);
+        bytes4[] memory selectors = new bytes4[](33);
         selectors[0] = CrottoProtocolHandler.buyTickets.selector;
         selectors[1] = CrottoProtocolHandler.initializePOL.selector;
         selectors[2] = CrottoProtocolHandler.requestRandomness.selector;
-        selectors[3] = CrottoProtocolHandler.retryRandomness.selector;
+        selectors[3] = CrottoProtocolHandler.expireLottery.selector;
         selectors[4] = CrottoProtocolHandler.fulfillRandomness.selector;
         selectors[5] = CrottoProtocolHandler.finalizeLottery.selector;
         selectors[6] = CrottoProtocolHandler.claimWinnings.selector;
@@ -803,6 +854,8 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         selectors[28] = CrottoProtocolHandler.buyTicketsWithBuilder.selector;
         selectors[29] = CrottoProtocolHandler.claimBuilderFees.selector;
         selectors[30] = CrottoProtocolHandler.fundOperationsReserve.selector;
+        selectors[31] = CrottoProtocolHandler.settleBuilderFees.selector;
+        selectors[32] = CrottoProtocolHandler.claimExpiredRoundRefund.selector;
         targetContract(address(handler));
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
@@ -810,7 +863,9 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
     function invariant_CustodyCoversEveryLiabilityClass() public view {
         InvariantAccountingView memory accounting = probe.protocolAccountingProbe();
         assertGe(
-            weth.balanceOf(address(diamond)), accounting.winnerWeth + accounting.rewardWeth + accounting.bootstrapWeth
+            weth.balanceOf(address(diamond)),
+            accounting.winnerWeth + accounting.rewardWeth + accounting.bootstrapWeth + accounting.ticketEscrowWeth
+                + accounting.expiredTicketRefundWeth + accounting.pendingBuybackWeth + accounting.lotteryNftWeth
         );
         assertGe(token.balanceOf(address(diamond)), accounting.rewardToken + accounting.vaultToken);
         assertGe(
@@ -831,6 +886,13 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
                 rewardTicketTotal += _rewardTickets(roundId, handler.actors(i));
             }
             assertEq(rewardTicketTotal, current.ticketCount);
+            for (uint256 i; i < 4; ++i) {
+                address builder = handler.actors(i);
+                assertEq(
+                    ICrottoBuilderFees(address(diamond)).provisionalBuilderCredit(roundId, builder),
+                    handler.modeledProvisionalBuilderCredits(roundId, builder)
+                );
+            }
             if (!current.prizeClaimed) winnerLiabilities += current.winnerPoolWeth;
             playerLiabilities += current.unclaimedPlayerRewardLiability;
         }
@@ -910,27 +972,13 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
     }
 
     function _installLifecycleAndProbeFacets() private {
-        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](7);
+        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](3);
         cuts[0] = _facetCut(
-            address(new LotteryVRFFacet()), _artifactSelectors("out/LotteryVRFFacet.sol/LotteryVRFFacet.json")
-        );
-        cuts[1] = _facetCut(
-            address(new LotteryFinalizationFacet()),
-            _artifactSelectors("out/LotteryFinalizationFacet.sol/LotteryFinalizationFacet.json")
-        );
-        cuts[2] = _facetCut(
             address(new OperationsFacet()), _artifactSelectors("out/OperationsFacet.sol/OperationsFacet.json")
         );
-        cuts[3] = _facetCut(
-            address(new RewardActivationFacet()),
-            _artifactSelectors("out/RewardActivationFacet.sol/RewardActivationFacet.json")
-        );
-        cuts[4] = _facetCut(
-            address(new RewardClaimsFacet()), _artifactSelectors("out/RewardClaimsFacet.sol/RewardClaimsFacet.json")
-        );
-        cuts[5] =
+        cuts[1] =
             _facetCut(address(new NFTVaultFacet()), _artifactSelectors("out/NFTVaultFacet.sol/NFTVaultFacet.json"));
-        cuts[6] = _facetCut(
+        cuts[2] = _facetCut(
             address(new InvariantProbeFacet()),
             _artifactSelectors("out/CrottoProtocolInvariant.t.sol/InvariantProbeFacet.json")
         );

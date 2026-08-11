@@ -13,7 +13,7 @@ contract BuilderFeesSelectorManifestTest is Test {
         // Path is fixed by this test and access is read-only to generated Foundry output.
         // forge-lint: disable-next-line(unsafe-cheatcode)
         string[] memory signatures = vm.parseJsonKeys(vm.readFile(FACET_ARTIFACT), ".methodIdentifiers");
-        assertEq(signatures.length, 7);
+        assertEq(signatures.length, 9);
         _assertContains(signatures, bytes4(keccak256("MAX_BUILDER_FEE_BPS()")));
         _assertContains(signatures, BuilderFeesFacet.approveBuilder.selector);
         _assertContains(signatures, BuilderFeesFacet.revokeBuilder.selector);
@@ -21,6 +21,8 @@ contract BuilderFeesSelectorManifestTest is Test {
         _assertContains(signatures, BuilderFeesFacet.builderApproval.selector);
         _assertContains(signatures, BuilderFeesFacet.builderCredit.selector);
         _assertContains(signatures, BuilderFeesFacet.totalBuilderFeeLiability.selector);
+        _assertContains(signatures, BuilderFeesFacet.settleBuilderFees.selector);
+        _assertContains(signatures, BuilderFeesFacet.provisionalBuilderCredit.selector);
     }
 
     function _assertContains(string[] memory signatures, bytes4 expected) private pure {

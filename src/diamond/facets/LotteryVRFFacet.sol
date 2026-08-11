@@ -17,13 +17,13 @@ import {
 } from "../../types/CrottoTypes.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
 
-/// @notice Native-funded Chainlink VRF requests, delayed retries, and first-valid fulfillment acceptance.
+/// @notice One native-funded Chainlink VRF request with a bounded fulfillment deadline.
 contract LotteryVRFFacet is CrottoFacet {
     uint32 private constant NUM_WORDS = 1;
 
     error UnknownRound(uint256 roundId);
     error InvalidRandomnessRequestStatus(uint256 roundId, RoundStatus status);
-    error RandomnessRetryTooEarly(uint256 roundId, uint256 elapsed, uint256 requiredDelay);
+    error RoundRequestDeadlinePassed(uint256 roundId, uint256 currentBlock, uint256 deadline);
     error VrfCostExceedsMaximum(uint256 quotedCost, uint256 maximumCost);
     error InvalidVrfRequestId(uint256 requestId);
     error DuplicateVrfRequestId(uint256 requestId);
@@ -35,25 +35,12 @@ contract LotteryVRFFacet is CrottoFacet {
         if (currentRound.status != RoundStatus.Closed) {
             revert InvalidRandomnessRequestStatus(roundId, currentRound.status);
         }
+        uint256 deadline = uint256(currentRound.closedAtBlock) + currentRound.config.vrfTimeoutBlocks;
+        if (block.number > deadline) revert RoundRequestDeadlinePassed(roundId, block.number, deadline);
 
         requestId = _request(currentRound, roundId, 1, CallerAction.RandomnessRequest);
         currentRound.status = RoundStatus.VRFPending;
         emit ICrotto.RandomnessRequested(roundId, requestId, 1, msg.sender);
-    }
-
-    function retryRandomness(uint256 roundId) external nonReentrant returns (uint256 requestId) {
-        Round storage currentRound = _round(roundId);
-        if (currentRound.status != RoundStatus.VRFPending) {
-            revert InvalidRandomnessRequestStatus(roundId, currentRound.status);
-        }
-
-        uint256 elapsed = block.timestamp - uint256(currentRound.latestRequestAt);
-        uint256 requiredDelay = currentRound.config.vrfRetryDelay;
-        if (elapsed < requiredDelay) revert RandomnessRetryTooEarly(roundId, elapsed, requiredDelay);
-
-        uint32 attempt = currentRound.requestAttempts + 1;
-        requestId = _request(currentRound, roundId, attempt, CallerAction.RandomnessRetry);
-        emit ICrotto.RandomnessRetried(roundId, requestId, attempt, msg.sender);
     }
 
     /// @notice Chainlink wrapper callback; malformed or obsolete fulfillments are deliberately non-reverting.
@@ -81,6 +68,10 @@ contract LotteryVRFFacet is CrottoFacet {
         }
         if (randomWords.length != NUM_WORDS) {
             emit ICrotto.RandomnessIgnored(requestId, roundId, IgnoredFulfillmentReason.InvalidWordCount);
+            return;
+        }
+        if (block.number > uint256(currentRound.latestRequestBlock) + currentRound.config.vrfTimeoutBlocks) {
+            emit ICrotto.RandomnessIgnored(requestId, roundId, IgnoredFulfillmentReason.FulfillmentTimedOut);
             return;
         }
 
@@ -124,7 +115,7 @@ contract LotteryVRFFacet is CrottoFacet {
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         if (lottery.requests[requestId].known) revert DuplicateVrfRequestId(requestId);
         lottery.requests[requestId] = RequestRecord({roundId: roundId, attempt: attempt, known: true});
-        currentRound.latestRequestAt = uint64(block.timestamp);
+        currentRound.latestRequestBlock = uint64(block.number);
         currentRound.requestAttempts = attempt;
 
         LibOperationsAccounting.enforceNativeSolvency();

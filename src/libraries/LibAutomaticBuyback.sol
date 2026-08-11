@@ -3,7 +3,6 @@ pragma solidity 0.8.33;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {IPoolManager} from "@uniswap/v4-core/src/interfaces/IPoolManager.sol";
-import {StateLibrary} from "@uniswap/v4-core/src/libraries/StateLibrary.sol";
 import {TransientStateLibrary} from "@uniswap/v4-core/src/libraries/TransientStateLibrary.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
 import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
@@ -23,7 +22,6 @@ import {HookConfiguration, ImmutableConfiguration} from "../types/CrottoTypes.so
 /// @notice Transaction-scoped canonical PoolManager settlement for automatic ticket buybacks.
 library LibAutomaticBuyback {
     using PoolIdLibrary for PoolKey;
-    using StateLibrary for IPoolManager;
     using TransientStateLibrary for IPoolManager;
 
     bytes32 private constant EXECUTION_CONSUMED = bytes32(uint256(1));
@@ -52,7 +50,7 @@ library LibAutomaticBuyback {
         address treasuryReceiver;
     }
 
-    function execute(uint256 roundId, address buyer, uint256 grossWethBudget)
+    function execute(address caller, uint256 consumedWeth, uint256 callerTipWeth, uint256 grossWethBudget)
         internal
         returns (LibAutomaticBuybackMath.Quote memory quote, uint256 actualNetTokenOut)
     {
@@ -82,7 +80,7 @@ library LibAutomaticBuyback {
             revert InvalidCanonicalDirection();
         }
         IPoolManager manager = IPoolManager(immutableConfig.uniswapV4PoolManager);
-        (uint160 sqrtPriceX96,,,) = manager.getSlot0(poolId);
+        (, uint160 sqrtPriceX96) = hook.consult(governance.buybackConfiguration.twapWindowSeconds);
         HookConfiguration memory hookConfiguration = hook.hookConfiguration();
         quote = LibAutomaticBuybackMath.quote(
             grossWethBudget,
@@ -123,15 +121,21 @@ library LibAutomaticBuyback {
         }
         actualNetTokenOut = tokenOutput;
 
-        emit IAutomaticTicketBuyback.AutomaticTicketBuybackExecuted(
-            roundId,
-            buyer,
+        LibBuybackStorage.Layout storage totals = LibBuybackStorage.layout();
+        totals.totalWethPurchased += grossWethBudget;
+        totals.totalTokenReceived += actualNetTokenOut;
+        uint256 sequence = ++totals.executionCount;
+        emit IAutomaticTicketBuyback.PendingBuybackExecuted(
+            caller,
             payload.treasuryReceiver,
-            grossWethBudget,
+            sequence,
+            consumedWeth,
+            callerTipWeth,
             quote.specifiedWethIn,
             quote.inputHookFee,
             actualWethDebit,
             governance.buybackConfiguration.slippageBps,
+            governance.buybackConfiguration.twapWindowSeconds,
             quote.minimumNetTokenOut,
             actualNetTokenOut
         );

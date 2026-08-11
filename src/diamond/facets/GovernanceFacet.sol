@@ -25,8 +25,8 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         LibGovernanceStorage.Layout storage state = _governanceState();
 
         LibCrottoValidation.validateRoundConfiguration(configuration);
-        LibCrottoValidation.validateRoundBuybackCapacity(
-            configuration, state.immutableConfiguration.maxCombinedHookFeeBps
+        LibCrottoValidation.validateVrfTimeout(
+            configuration.vrfTimeoutBlocks, state.immutableConfiguration.vrfRequestConfirmations
         );
         LibCrottoValidation.validateBootstrapReachability(
             configuration, state.immutableConfiguration.requiredBootstrapWeth
