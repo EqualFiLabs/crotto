@@ -9,6 +9,7 @@ import {DiamondLoupeFacet} from "../../src/diamond/facets/DiamondLoupeFacet.sol"
 import {OwnershipFacet} from "../../src/diamond/facets/OwnershipFacet.sol";
 import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondInit.sol";
 import {LibDiamond} from "../../src/diamond/libraries/LibDiamond.sol";
+import {ICrottoFinalImmutability} from "../../src/interfaces/ICrottoFinalImmutability.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
@@ -53,7 +54,7 @@ contract DiamondSelectorManifestTest is Test {
         IDiamondLoupe loupe = IDiamondLoupe(address(diamond));
         address[] memory addresses = loupe.facetAddresses();
         assertEq(addresses.length, 3);
-        assertEq(_totalSelectorCount(loupe.facets()), 8);
+        assertEq(_totalSelectorCount(loupe.facets()), 9);
 
         _assertSelectorSet(loupe.facetFunctionSelectors(address(cutFacet)), _artifactSelectors(CUT_ARTIFACT));
         _assertSelectorSet(loupe.facetFunctionSelectors(address(loupeFacet)), _artifactSelectors(LOUPE_ARTIFACT));
@@ -68,8 +69,9 @@ contract DiamondSelectorManifestTest is Test {
         bytes4[] memory loupeSelectors = _artifactSelectors(LOUPE_ARTIFACT);
         bytes4[] memory ownershipSelectors = _artifactSelectors(OWNERSHIP_ARTIFACT);
 
-        assertEq(cutSelectors.length, 1);
-        assertEq(cutSelectors[0], IDiamondCut.diamondCut.selector);
+        assertEq(cutSelectors.length, 2);
+        _assertContains(cutSelectors, IDiamondCut.diamondCut.selector);
+        _assertContains(cutSelectors, ICrottoFinalImmutability.finalizeImmutability.selector);
 
         assertEq(loupeSelectors.length, 5);
         _assertContains(loupeSelectors, IDiamondLoupe.facets.selector);
