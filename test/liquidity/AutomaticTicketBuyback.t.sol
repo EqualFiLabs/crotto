@@ -14,6 +14,7 @@ import {PoolId, PoolIdLibrary} from "@uniswap/v4-core/src/types/PoolId.sol";
 import {PoolKey} from "@uniswap/v4-core/src/types/PoolKey.sol";
 import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
 import {CrottoDiamond} from "../../src/diamond/CrottoDiamond.sol";
+import {BuilderFeesFacet} from "../../src/diamond/facets/BuilderFeesFacet.sol";
 import {BuybackSettlementFacet} from "../../src/diamond/facets/BuybackSettlementFacet.sol";
 import {DiamondCutFacet} from "../../src/diamond/facets/DiamondCutFacet.sol";
 import {DiamondLoupeFacet} from "../../src/diamond/facets/DiamondLoupeFacet.sol";
@@ -26,6 +27,7 @@ import {RewardAccountingFacet} from "../../src/diamond/facets/RewardAccountingFa
 import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondInit.sol";
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
+import {ICrottoBuilderFees} from "../../src/interfaces/ICrottoBuilderFees.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {IPOLInitialization} from "../../src/interfaces/IPOLInitialization.sol";
 import {LibAutomaticBuyback} from "../../src/libraries/LibAutomaticBuyback.sol";
@@ -115,6 +117,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
     IPoolDonateRouter internal donateRouter;
     IPoolSwapRouter internal swapRouter;
     ICrotto internal lottery;
+    ICrottoBuilderFees internal builders;
     ICrottoGovernance internal governance;
     IPOLInitialization internal pol;
     LotteryViewFacet internal views;
@@ -160,6 +163,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         DiamondLoupeFacet loupeFacet = new DiamondLoupeFacet();
         OwnershipFacet ownershipFacet = new OwnershipFacet();
         GovernanceFacet governanceFacet = new GovernanceFacet();
+        BuilderFeesFacet builderFacet = new BuilderFeesFacet();
         LotteryTicketFacet ticketFacet = new LotteryTicketFacet();
         LotteryViewFacet viewFacet = new LotteryViewFacet();
         POLInitializationFacet polFacet = new POLInitializationFacet();
@@ -167,21 +171,22 @@ abstract contract AutomaticTicketBuybackFixture is Test {
         BuybackSettlementFacet settlementFacet = new BuybackSettlementFacet();
         CrottoDiamondInit initializer = new CrottoDiamondInit();
 
-        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](8);
+        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](9);
         cuts[0] = _facetCut(address(loupeFacet), _artifactSelectors("out/DiamondLoupeFacet.sol/DiamondLoupeFacet.json"));
         cuts[1] = _facetCut(address(ownershipFacet), _artifactSelectors("out/OwnershipFacet.sol/OwnershipFacet.json"));
         cuts[2] =
             _facetCut(address(governanceFacet), _artifactSelectors("out/GovernanceFacet.sol/GovernanceFacet.json"));
-        cuts[3] =
+        cuts[3] = _facetCut(address(builderFacet), _artifactSelectors("out/BuilderFeesFacet.sol/BuilderFeesFacet.json"));
+        cuts[4] =
             _facetCut(address(ticketFacet), _artifactSelectors("out/LotteryTicketFacet.sol/LotteryTicketFacet.json"));
-        cuts[4] = _facetCut(address(viewFacet), _artifactSelectors("out/LotteryViewFacet.sol/LotteryViewFacet.json"));
-        cuts[5] = _facetCut(
+        cuts[5] = _facetCut(address(viewFacet), _artifactSelectors("out/LotteryViewFacet.sol/LotteryViewFacet.json"));
+        cuts[6] = _facetCut(
             address(polFacet), _artifactSelectors("out/POLInitializationFacet.sol/POLInitializationFacet.json")
         );
-        cuts[6] = _facetCut(
+        cuts[7] = _facetCut(
             address(accountingFacet), _artifactSelectors("out/RewardAccountingFacet.sol/RewardAccountingFacet.json")
         );
-        cuts[7] = _facetCut(
+        cuts[8] = _facetCut(
             address(settlementFacet), _artifactSelectors("out/BuybackSettlementFacet.sol/BuybackSettlementFacet.json")
         );
 
@@ -194,6 +199,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
             );
 
         lottery = ICrotto(address(diamond));
+        builders = ICrottoBuilderFees(address(diamond));
         governance = ICrottoGovernance(address(diamond));
         pol = IPOLInitialization(address(diamond));
         views = LotteryViewFacet(address(diamond));

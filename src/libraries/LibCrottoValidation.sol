@@ -28,6 +28,7 @@ library LibCrottoValidation {
     error BootstrapThresholdUnreachable(uint256 available, uint256 required);
     error PlayerRewardLiabilityCapacityExceeded(uint256 rewardRate, uint256 ticketTarget);
     error TicketPaymentCapacityExceeded(uint256 ticketPrice, uint256 operationsFee, uint256 ticketTarget);
+    error BuilderTicketPaymentCapacityExceeded(uint256 canonicalPayment, uint256 builderFee, uint256 ticketTarget);
     error InvalidCanonicalTickSpacing(int24 tickSpacing);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
@@ -86,6 +87,14 @@ library LibCrottoValidation {
         uint256 paymentPerTicket = config.ticketPrice + config.ticketOperationsFee;
         if (paymentPerTicket > type(uint256).max / config.ticketTarget) {
             revert TicketPaymentCapacityExceeded(config.ticketPrice, config.ticketOperationsFee, config.ticketTarget);
+        }
+
+        uint256 maximumTicketValue = config.ticketPrice * config.ticketTarget;
+        uint256 maximumBuilderFee =
+            Math.mulDiv(maximumTicketValue, CrottoConstants.MAX_BUILDER_FEE_BPS, CrottoConstants.BPS);
+        uint256 maximumCanonicalPayment = paymentPerTicket * config.ticketTarget;
+        if (maximumBuilderFee > type(uint256).max - maximumCanonicalPayment) {
+            revert BuilderTicketPaymentCapacityExceeded(maximumCanonicalPayment, maximumBuilderFee, config.ticketTarget);
         }
 
         uint256 available = config.ticketOperationsFee * config.ticketTarget;

@@ -5,6 +5,8 @@ import {StdInvariant} from "forge-std/StdInvariant.sol";
 import {Test} from "forge-std/Test.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {BalanceDelta} from "@uniswap/v4-core/src/types/BalanceDelta.sol";
 import {Currency} from "@uniswap/v4-core/src/types/Currency.sol";
@@ -21,6 +23,7 @@ import {RewardClaimsFacet} from "../../src/diamond/facets/RewardClaimsFacet.sol"
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
+import {ICrottoBuilderFees} from "../../src/interfaces/ICrottoBuilderFees.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {ICrottoRewards} from "../../src/interfaces/ICrottoRewards.sol";
 import {ICrottoSwapFeeHook} from "../../src/interfaces/ICrottoSwapFeeHook.sol";
@@ -29,6 +32,7 @@ import {IPOLInitialization} from "../../src/interfaces/IPOLInitialization.sol";
 import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
 import {LibRewardAccounting} from "../../src/libraries/LibRewardAccounting.sol";
 import {LibBuybackStorage} from "../../src/libraries/storage/LibBuybackStorage.sol";
+import {LibBuilderFeesStorage} from "../../src/libraries/storage/LibBuilderFeesStorage.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
@@ -59,6 +63,7 @@ struct InvariantAccountingView {
     uint256 bootstrapWeth;
     uint256 operationsEth;
     uint256 callerCreditsEth;
+    uint256 builderCreditsEth;
 }
 
 interface IInvariantProbe {
@@ -87,7 +92,8 @@ contract InvariantProbeFacet {
             vaultToken: LibVaultStorage.layout().tokenBacking,
             bootstrapWeth: LibPOLStorage.layout().bootstrapWeth,
             operationsEth: treasury.operationsReserveEth,
-            callerCreditsEth: treasury.totalCallerCreditsEth
+            callerCreditsEth: treasury.totalCallerCreditsEth,
+            builderCreditsEth: LibBuilderFeesStorage.layout().totalNativeEthLiability
         });
     }
 
@@ -137,6 +143,7 @@ contract CrottoProtocolHandler is Test {
 
     ICrotto public immutable lottery;
     ICrottoGovernance public immutable governance;
+    ICrottoBuilderFees public immutable builders;
     ICrottoRewards public immutable rewards;
     INFTVault public immutable vault;
     IPOLInitialization public immutable pol;
@@ -162,6 +169,8 @@ contract CrottoProtocolHandler is Test {
     mapping(uint256 roundId => uint256 ticket) public finalizedTickets;
     mapping(uint256 roundId => uint256 count) public winnerClaimCount;
     mapping(uint256 roundId => mapping(address player => uint256 count)) public playerClaimCount;
+    mapping(address builder => uint256 credit) public modeledBuilderCredits;
+    uint256 public modeledBuilderLiability;
 
     uint256 public playerRewardsMinted;
     uint256 public activationTokensBurned;
@@ -178,6 +187,7 @@ contract CrottoProtocolHandler is Test {
         diamond = refs.diamond;
         lottery = ICrotto(refs.diamond);
         governance = ICrottoGovernance(refs.diamond);
+        builders = ICrottoBuilderFees(refs.diamond);
         rewards = ICrottoRewards(refs.diamond);
         vault = INFTVault(refs.diamond);
         pol = IPOLInitialization(refs.diamond);
@@ -244,6 +254,66 @@ contract CrottoProtocolHandler is Test {
         if (initializedBefore) _checkBuybackLogs(logs, roundId, actor, expectedBuyback);
         else if (pol.bootstrapPolWeth() < bootstrapBefore + expectedBuyback) buybackBudgetViolation = true;
         _observeLiquidity();
+    }
+
+    function setBuilderApproval(uint256 playerSeed, uint256 builderSeed, uint256 feeSeed, bool redirect) external {
+        address buyer = _actor(playerSeed);
+        address builder = _actor(builderSeed);
+        uint16 maximumFeeBps = SafeCast.toUint16(bound(feeSeed, 0, 50));
+        if (maximumFeeBps == 0 && !redirect) redirect = true;
+        vm.prank(buyer);
+        try builders.approveBuilder(builder, maximumFeeBps, redirect) {} catch {}
+    }
+
+    function revokeBuilder(uint256 playerSeed, uint256 builderSeed) external {
+        vm.prank(_actor(playerSeed));
+        try builders.revokeBuilder(_actor(builderSeed)) {} catch {}
+    }
+
+    function buyTicketsWithBuilder(
+        uint256 playerSeed,
+        uint256 builderSeed,
+        uint256 quantitySeed,
+        uint256 feeSeed,
+        bool redirect
+    ) external {
+        uint256 roundId = _currentRoundId();
+        Round memory current = _round(roundId);
+        if (current.status != RoundStatus.Open || current.ticketCount >= current.config.ticketTarget) return;
+        address buyer = _actor(playerSeed);
+        address builder = _actor(builderSeed);
+        uint16 approved = builders.builderApproval(buyer, builder).maximumFeeBps;
+        uint16 feeBps = SafeCast.toUint16(bound(feeSeed, 0, approved));
+        uint256 quantity = bound(quantitySeed, 1, current.config.ticketTarget - current.ticketCount);
+        uint256 ticketValue = current.config.ticketPrice * quantity;
+        uint256 builderFee = Math.mulDiv(ticketValue, feeBps, BPS);
+        uint256 payment = ticketValue + current.config.ticketOperationsFee * quantity + builderFee;
+        if (buyer.balance < payment) return;
+
+        bytes32 beforeDigest = _purchaseDigest(roundId);
+        vm.prank(buyer);
+        (bool success,) = diamond.call{value: payment}(
+            abi.encodeCall(ICrotto.buyTicketsWithBuilder, (quantity, builder, feeBps, redirect))
+        );
+        if (!success) {
+            if (_purchaseDigest(roundId) != beforeDigest) purchaseRollbackViolation = true;
+            return;
+        }
+        modeledBuilderCredits[builder] += builderFee;
+        modeledBuilderLiability += builderFee;
+        _observeLiquidity();
+    }
+
+    function claimBuilderFees(uint256 builderSeed) external {
+        address builder = _actor(builderSeed);
+        uint256 expected = modeledBuilderCredits[builder];
+        if (expected == 0) return;
+        vm.prank(builder);
+        try builders.claimBuilderFees(builder) returns (uint256 amount) {
+            if (amount != expected) purchaseRollbackViolation = true;
+            modeledBuilderCredits[builder] = 0;
+            modeledBuilderLiability -= amount;
+        } catch {}
     }
 
     function initializePOL(uint256) external {
@@ -332,7 +402,7 @@ contract CrottoProtocolHandler is Test {
         uint256 roundId = _boundedRound(roundSeed);
         if (roundId == 0) return;
         address actor = _actor(actorSeed);
-        uint256 entitlement = _playerTickets(roundId, actor) * _round(roundId).config.playerRewardRate;
+        uint256 entitlement = _rewardTickets(roundId, actor) * _round(roundId).config.playerRewardRate;
         if (entitlement == 0) return;
         uint256 supplyBefore = token.totalSupply();
         vm.prank(actor);
@@ -581,9 +651,9 @@ contract CrottoProtocolHandler is Test {
         if (success) current = abi.decode(data, (Round));
     }
 
-    function _playerTickets(uint256 roundId, address actor) private view returns (uint256) {
+    function _rewardTickets(uint256 roundId, address actor) private view returns (uint256) {
         (bool success, bytes memory data) =
-            diamond.staticcall(abi.encodeWithSignature("playerTickets(uint256,address)", roundId, actor));
+            diamond.staticcall(abi.encodeWithSignature("rewardTickets(uint256,address)", roundId, actor));
         return success ? abi.decode(data, (uint256)) : 0;
     }
 
@@ -650,7 +720,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         handler.seedActors();
         IERC173(address(diamond)).transferOwnership(address(handler));
 
-        bytes4[] memory selectors = new bytes4[](26);
+        bytes4[] memory selectors = new bytes4[](30);
         selectors[0] = CrottoProtocolHandler.buyTickets.selector;
         selectors[1] = CrottoProtocolHandler.initializePOL.selector;
         selectors[2] = CrottoProtocolHandler.requestRandomness.selector;
@@ -677,6 +747,10 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         selectors[23] = CrottoProtocolHandler.setTreasuryReceiver.selector;
         selectors[24] = CrottoProtocolHandler.unpauseActions.selector;
         selectors[25] = CrottoProtocolHandler.donateRewardNFT.selector;
+        selectors[26] = CrottoProtocolHandler.setBuilderApproval.selector;
+        selectors[27] = CrottoProtocolHandler.revokeBuilder.selector;
+        selectors[28] = CrottoProtocolHandler.buyTicketsWithBuilder.selector;
+        selectors[29] = CrottoProtocolHandler.claimBuilderFees.selector;
         targetContract(address(handler));
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }
@@ -687,7 +761,10 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
             weth.balanceOf(address(diamond)), accounting.winnerWeth + accounting.rewardWeth + accounting.bootstrapWeth
         );
         assertGe(token.balanceOf(address(diamond)), accounting.rewardToken + accounting.vaultToken);
-        assertGe(address(diamond).balance, accounting.operationsEth + accounting.callerCreditsEth);
+        assertGe(
+            address(diamond).balance,
+            accounting.operationsEth + accounting.callerCreditsEth + accounting.builderCreditsEth
+        );
         assertGe(token.balanceOf(address(hook)), hook.pendingPermanentLiquidity(Currency.wrap(address(token))));
         assertGe(weth.balanceOf(address(hook)), hook.pendingPermanentLiquidity(Currency.wrap(address(weth))));
 
@@ -697,11 +774,21 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         for (uint256 roundId = 1; roundId <= currentRoundId; ++roundId) {
             Round memory current = _round(roundId);
             assertLe(current.ticketCount, current.config.ticketTarget);
+            uint256 rewardTicketTotal;
+            for (uint256 i; i < 4; ++i) {
+                rewardTicketTotal += _rewardTickets(roundId, handler.actors(i));
+            }
+            assertEq(rewardTicketTotal, current.ticketCount);
             if (!current.prizeClaimed) winnerLiabilities += current.winnerPoolWeth;
             playerLiabilities += current.unclaimedPlayerRewardLiability;
         }
         assertEq(accounting.winnerWeth, winnerLiabilities);
         assertEq(accounting.playerToken, playerLiabilities);
+        assertEq(accounting.builderCreditsEth, handler.modeledBuilderLiability());
+        for (uint256 i; i < 4; ++i) {
+            address actor = handler.actors(i);
+            assertEq(ICrottoBuilderFees(address(diamond)).builderCredit(actor), handler.modeledBuilderCredits(actor));
+        }
     }
 
     function invariant_RandomnessWinnersAndClaimsRemainImmutable() public view {
@@ -810,5 +897,11 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         (bool success, bytes memory data) =
             address(diamond).staticcall(abi.encodeWithSignature("round(uint256)", roundId));
         if (success) current = abi.decode(data, (Round));
+    }
+
+    function _rewardTickets(uint256 roundId, address beneficiary) private view returns (uint256 count) {
+        (bool success, bytes memory data) =
+            address(diamond).staticcall(abi.encodeWithSignature("rewardTickets(uint256,address)", roundId, beneficiary));
+        if (success) count = abi.decode(data, (uint256));
     }
 }

@@ -84,6 +84,22 @@ struct BuybackConfiguration {
     uint16 slippageBps;
 }
 
+/// @notice One player's independent fee and ticket-reward permissions for a Builder.
+struct BuilderApproval {
+    uint16 maximumFeeBps;
+    bool mayReceiveTicketRewards;
+}
+
+/// @notice Exact native payment and reward-routing preview for a builder-aware purchase.
+struct BuilderTicketQuote {
+    uint256 ticketValueEth;
+    uint256 operationsFeeEth;
+    uint256 builderFeeEth;
+    uint256 totalEth;
+    address rewardBeneficiary;
+    bool rewardRedirectEffective;
+}
+
 /// @notice Complete one-time Diamond governance initialization payload.
 struct GovernanceInitialization {
     ImmutableConfiguration immutableConfiguration;

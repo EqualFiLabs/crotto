@@ -3,6 +3,7 @@ pragma solidity 0.8.33;
 
 import {
     ActivationConfiguration,
+    BuilderTicketQuote,
     HookConfiguration,
     ImmutableConfiguration,
     ProtocolAccountingView,
@@ -36,11 +37,22 @@ interface ICrottoView {
         view
         returns (uint256 ticketPriceEth, uint256 operationsFeeEth, uint256 totalEth);
 
+    function builderTicketQuote(
+        uint256 roundId,
+        uint256 quantity,
+        address player,
+        address builder,
+        uint16 builderFeeBps,
+        bool redirectTicketRewards
+    ) external view returns (BuilderTicketQuote memory quote);
+
     function ticketBatchCount(uint256 roundId) external view returns (uint256);
 
     function ticketBatch(uint256 roundId, uint256 index) external view returns (TicketBatch memory);
 
     function playerTickets(uint256 roundId, address player) external view returns (uint256);
+
+    function rewardTickets(uint256 roundId, address beneficiary) external view returns (uint256);
 
     function playerRewardClaimed(uint256 roundId, address player) external view returns (bool);
 

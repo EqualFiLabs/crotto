@@ -213,6 +213,7 @@ contract LotteryTicketingTest is Test {
         assertEq(stateView.winnerLiability(), 101);
         assertEq(views.remainingTickets(1), 8);
         assertEq(views.playerTickets(1, player), 2);
+        assertEq(views.rewardTickets(1, player), 2);
         assertEq(views.ticketBatchCount(1), 1);
         TicketBatch memory batch = views.ticketBatch(1, 0);
         assertEq(batch.endExclusive, 2);
@@ -517,13 +518,15 @@ contract LotteryTicketingTest is Test {
     }
 
     function _ticketSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](2);
+        selectors = new bytes4[](4);
         selectors[0] = LotteryTicketFacet.buyTickets.selector;
-        selectors[1] = LotteryTicketFacet.ticketQuote.selector;
+        selectors[1] = LotteryTicketFacet.buyTicketsWithBuilder.selector;
+        selectors[2] = LotteryTicketFacet.ticketQuote.selector;
+        selectors[3] = LotteryTicketFacet.builderTicketQuote.selector;
     }
 
     function _viewSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](9);
+        selectors = new bytes4[](10);
         selectors[0] = LotteryViewFacet.currentRoundId.selector;
         selectors[1] = LotteryViewFacet.round.selector;
         selectors[2] = LotteryViewFacet.remainingTickets.selector;
@@ -531,8 +534,9 @@ contract LotteryTicketingTest is Test {
         selectors[4] = LotteryViewFacet.ticketBatch.selector;
         selectors[5] = LotteryViewFacet.playerTickets.selector;
         selectors[6] = LotteryViewFacet.playerRewardClaimed.selector;
-        selectors[7] = LotteryViewFacet.playerRewardEntitlement.selector;
-        selectors[8] = LotteryViewFacet.requestRecord.selector;
+        selectors[7] = LotteryViewFacet.rewardTickets.selector;
+        selectors[8] = LotteryViewFacet.playerRewardEntitlement.selector;
+        selectors[9] = LotteryViewFacet.requestRecord.selector;
     }
 
     function _stateSelectors() private pure returns (bytes4[] memory selectors) {

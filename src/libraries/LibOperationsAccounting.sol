@@ -2,6 +2,7 @@
 pragma solidity 0.8.33;
 
 import {ICrotto} from "../interfaces/ICrotto.sol";
+import {LibBuilderFeesStorage} from "./storage/LibBuilderFeesStorage.sol";
 import {LibTreasuryStorage} from "./storage/LibTreasuryStorage.sol";
 import {CallerAction} from "../types/CrottoTypes.sol";
 
@@ -57,7 +58,8 @@ library LibOperationsAccounting {
 
     function enforceNativeSolvency() internal view {
         LibTreasuryStorage.Layout storage state = LibTreasuryStorage.layout();
-        uint256 required = state.operationsReserveEth + state.totalCallerCreditsEth;
+        uint256 required = state.operationsReserveEth + state.totalCallerCreditsEth
+            + LibBuilderFeesStorage.layout().totalNativeEthLiability;
         uint256 balance = address(this).balance;
         if (balance < required) revert NativeAccountingInsolvent(balance, required);
     }

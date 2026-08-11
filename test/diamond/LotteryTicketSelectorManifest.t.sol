@@ -13,9 +13,11 @@ contract LotteryTicketSelectorManifestTest is Test {
         // Path is fixed by this test and access is read-only to generated Foundry output.
         // forge-lint: disable-next-line(unsafe-cheatcode)
         string[] memory signatures = vm.parseJsonKeys(vm.readFile(FACET_ARTIFACT), ".methodIdentifiers");
-        assertEq(signatures.length, 2);
+        assertEq(signatures.length, 4);
         _assertContains(signatures, LotteryTicketFacet.buyTickets.selector);
+        _assertContains(signatures, LotteryTicketFacet.buyTicketsWithBuilder.selector);
         _assertContains(signatures, LotteryTicketFacet.ticketQuote.selector);
+        _assertContains(signatures, LotteryTicketFacet.builderTicketQuote.selector);
     }
 
     function _assertContains(string[] memory signatures, bytes4 expected) private pure {
