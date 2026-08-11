@@ -156,6 +156,7 @@ library LibDiamond {
             ds, ICrottoGovernance.setRoundConfiguration.selector
         ) && _selectorInstalled(ds, ICrottoGovernance.setActivationConfiguration.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setHookConfiguration.selector)
+        && _selectorInstalled(ds, ICrottoGovernance.addPOL.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setBuybackConfiguration.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setTreasuryReceiver.selector)
         && _selectorInstalled(ds, ICrottoGovernance.setGuardian.selector)

@@ -19,6 +19,7 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
     error GovernanceNotInitialized();
     error NotGuardianOrOwner(address caller);
     error CanonicalHookHasNoCode(address hook);
+    error InvalidPOLFunder(address funder);
 
     function setRoundConfiguration(RoundConfiguration calldata configuration) external {
         LibDiamond.enforceIsContractOwner();
@@ -69,6 +70,23 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
         ICrottoSwapFeeHook(hook).setHookConfiguration(configuration);
 
         emit HookConfigurationSet(configuration);
+    }
+
+    /// @notice Adds exact externally funded assets to permanent liquidity after timelock authorization.
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount)
+        external
+        nonReentrant
+        returns (uint128 liquidityAdded)
+    {
+        LibDiamond.enforceIsContractOwner();
+        LibGovernanceStorage.Layout storage state = _governanceState();
+        if (funder == address(0) || LibCrottoValidation.isProtocolAddress(funder, state.immutableConfiguration)) {
+            revert InvalidPOLFunder(funder);
+        }
+
+        address hook = state.immutableConfiguration.canonicalHook;
+        if (hook.code.length == 0) revert CanonicalHookHasNoCode(hook);
+        liquidityAdded = ICrottoSwapFeeHook(hook).addPOL(funder, tokenAmount, wethAmount);
     }
 
     function setTreasuryReceiver(address newReceiver) external {

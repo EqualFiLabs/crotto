@@ -51,6 +51,9 @@ contract GovernedHookProbe {
     address public lastCaller;
     bool public rejectConfiguration;
     HookConfiguration private storedConfiguration;
+    address public lastFunder;
+    uint256 public lastTokenAmount;
+    uint256 public lastWethAmount;
 
     function configureBindings(
         address diamond_,
@@ -84,6 +87,15 @@ contract GovernedHookProbe {
         if (rejectConfiguration) revert ConfigurationRejected();
         lastCaller = msg.sender;
         storedConfiguration = newConfiguration;
+    }
+
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount) external returns (uint128) {
+        if (msg.sender != diamond) revert UnauthorizedDiamond(msg.sender, diamond);
+        lastCaller = msg.sender;
+        lastFunder = funder;
+        lastTokenAmount = tokenAmount;
+        lastWethAmount = wethAmount;
+        return 1;
     }
 
     function configuration() external view returns (HookConfiguration memory) {
@@ -650,6 +662,37 @@ contract DiamondGovernanceTest is Test {
             abi.encodeWithSelector(GovernedHookProbe.UnauthorizedDiamond.selector, proposer, address(diamond))
         );
         hook.setHookConfiguration(hookConfiguration);
+
+        vm.prank(proposer);
+        vm.expectRevert(abi.encodeWithSelector(LibDiamond.NotContractOwner.selector, proposer, address(timelock)));
+        governance.addPOL(treasury, 1 ether, 1 ether);
+
+        vm.prank(guardian);
+        vm.expectRevert(abi.encodeWithSelector(LibDiamond.NotContractOwner.selector, guardian, address(timelock)));
+        governance.addPOL(treasury, 1 ether, 1 ether);
+    }
+
+    function test_TimelockAuthorizesExactExternalPolFunding() public {
+        _executeThroughTimelock(address(diamond), abi.encodeCall(governance.addPOL, (treasury, 2_000 ether, 2 ether)));
+
+        assertEq(hook.lastCaller(), address(diamond));
+        assertEq(hook.lastFunder(), treasury);
+        assertEq(hook.lastTokenAmount(), 2_000 ether);
+        assertEq(hook.lastWethAmount(), 2 ether);
+    }
+
+    function test_RevertWhen_PolFunderIsProtocolCustody() public {
+        vm.prank(address(timelock));
+        vm.expectRevert(abi.encodeWithSelector(GovernanceFacet.InvalidPOLFunder.selector, address(0)));
+        governance.addPOL(address(0), 1 ether, 0);
+
+        vm.prank(address(timelock));
+        vm.expectRevert(abi.encodeWithSelector(GovernanceFacet.InvalidPOLFunder.selector, address(diamond)));
+        governance.addPOL(address(diamond), 1 ether, 0);
+
+        vm.prank(address(timelock));
+        vm.expectRevert(abi.encodeWithSelector(GovernanceFacet.InvalidPOLFunder.selector, address(hook)));
+        governance.addPOL(address(hook), 0, 1 ether);
     }
 
     function test_RevertWhen_TimelockSetsDiamondAsTreasuryReceiver() public {
@@ -960,19 +1003,20 @@ contract DiamondGovernanceTest is Test {
     }
 
     function _governanceSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](12);
+        selectors = new bytes4[](13);
         selectors[0] = ICrottoGovernance.setRoundConfiguration.selector;
         selectors[1] = ICrottoGovernance.setActivationConfiguration.selector;
         selectors[2] = ICrottoGovernance.setHookConfiguration.selector;
-        selectors[3] = ICrottoGovernance.setTreasuryReceiver.selector;
-        selectors[4] = ICrottoGovernance.setBuybackConfiguration.selector;
-        selectors[5] = ICrottoGovernance.setGuardian.selector;
-        selectors[6] = ICrottoGovernance.pauseActions.selector;
-        selectors[7] = ICrottoGovernance.unpauseActions.selector;
-        selectors[8] = ICrottoGovernance.treasuryReceiver.selector;
-        selectors[9] = ICrottoGovernance.guardian.selector;
-        selectors[10] = ICrottoGovernance.pausedActions.selector;
-        selectors[11] = ICrottoGovernance.buybackConfiguration.selector;
+        selectors[3] = ICrottoGovernance.addPOL.selector;
+        selectors[4] = ICrottoGovernance.setTreasuryReceiver.selector;
+        selectors[5] = ICrottoGovernance.setBuybackConfiguration.selector;
+        selectors[6] = ICrottoGovernance.setGuardian.selector;
+        selectors[7] = ICrottoGovernance.pauseActions.selector;
+        selectors[8] = ICrottoGovernance.unpauseActions.selector;
+        selectors[9] = ICrottoGovernance.treasuryReceiver.selector;
+        selectors[10] = ICrottoGovernance.guardian.selector;
+        selectors[11] = ICrottoGovernance.pausedActions.selector;
+        selectors[12] = ICrottoGovernance.buybackConfiguration.selector;
     }
 
     function _stateProbeSelectors() private pure returns (bytes4[] memory selectors) {

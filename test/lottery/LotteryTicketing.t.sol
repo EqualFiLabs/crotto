@@ -573,19 +573,20 @@ contract LotteryTicketingTest is Test {
     }
 
     function _governanceSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](12);
+        selectors = new bytes4[](13);
         selectors[0] = ICrottoGovernance.setRoundConfiguration.selector;
         selectors[1] = ICrottoGovernance.setActivationConfiguration.selector;
         selectors[2] = ICrottoGovernance.setHookConfiguration.selector;
-        selectors[3] = ICrottoGovernance.setTreasuryReceiver.selector;
-        selectors[4] = ICrottoGovernance.setBuybackConfiguration.selector;
-        selectors[5] = ICrottoGovernance.setGuardian.selector;
-        selectors[6] = ICrottoGovernance.pauseActions.selector;
-        selectors[7] = ICrottoGovernance.unpauseActions.selector;
-        selectors[8] = ICrottoGovernance.treasuryReceiver.selector;
-        selectors[9] = ICrottoGovernance.guardian.selector;
-        selectors[10] = ICrottoGovernance.pausedActions.selector;
-        selectors[11] = ICrottoGovernance.buybackConfiguration.selector;
+        selectors[3] = ICrottoGovernance.addPOL.selector;
+        selectors[4] = ICrottoGovernance.setTreasuryReceiver.selector;
+        selectors[5] = ICrottoGovernance.setBuybackConfiguration.selector;
+        selectors[6] = ICrottoGovernance.setGuardian.selector;
+        selectors[7] = ICrottoGovernance.pauseActions.selector;
+        selectors[8] = ICrottoGovernance.unpauseActions.selector;
+        selectors[9] = ICrottoGovernance.treasuryReceiver.selector;
+        selectors[10] = ICrottoGovernance.guardian.selector;
+        selectors[11] = ICrottoGovernance.pausedActions.selector;
+        selectors[12] = ICrottoGovernance.buybackConfiguration.selector;
     }
 
     function _ticketSelectors() private pure returns (bytes4[] memory selectors) {

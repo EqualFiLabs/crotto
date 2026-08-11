@@ -54,8 +54,9 @@ contract ProtocolFoundationTest is Test {
         assertEq(ICrottoGovernance.treasuryReceiver.selector, bytes4(keccak256("treasuryReceiver()")));
     }
 
-    function test_PolDonationAndBackupCompoundingSelectorsAreStable() public pure {
-        assertEq(ICrottoSwapFeeHook.donatePOL.selector, bytes4(keccak256("donatePOL(uint256,uint256)")));
+    function test_GovernedPolAdditionAndBackupCompoundingSelectorsAreStable() public pure {
+        assertEq(ICrottoGovernance.addPOL.selector, bytes4(keccak256("addPOL(address,uint256,uint256)")));
+        assertEq(ICrottoSwapFeeHook.addPOL.selector, bytes4(keccak256("addPOL(address,uint256,uint256)")));
         assertEq(ICrottoSwapFeeHook.compoundPOL.selector, bytes4(keccak256("compoundPOL()")));
     }
 
@@ -70,7 +71,8 @@ contract ProtocolFoundationTest is Test {
         assertTrue(_artifactHasFunction("out/IRewardNFT.sol/IRewardNFT.json", "mint"));
         assertTrue(_artifactHasFunction("out/INFTVault.sol/INFTVault.json", "redeemRewardNFT"));
         assertTrue(_artifactHasFunction("out/ICrottoGovernance.sol/ICrottoGovernance.json", "treasuryReceiver"));
-        assertTrue(_artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "donatePOL"));
+        assertTrue(_artifactHasFunction("out/ICrottoGovernance.sol/ICrottoGovernance.json", "addPOL"));
+        assertTrue(_artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "addPOL"));
         assertTrue(_artifactHasFunction("out/ICrottoSwapFeeHook.sol/ICrottoSwapFeeHook.json", "compoundPOL"));
 
         _assertArtifactExcludes(

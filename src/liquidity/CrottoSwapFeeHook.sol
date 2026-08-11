@@ -69,7 +69,7 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
     error UnauthorizedPoolInitialization(address sender);
     error ExternalLiquidityModification(address sender);
     error PermanentLiquidityRemovalForbidden();
-    error EmptyPOLDonation();
+    error EmptyPOLAddition();
     error EmptyInitialLiquidity();
     error ReentrantHookCall();
     error InvalidUnlockCaller(address caller);
@@ -82,6 +82,7 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
     error IncompatiblePoolCurrency(Currency currency, uint256 expected, uint256 actual);
     error UnexpectedSettlement(Currency currency, uint256 expected, uint256 actual);
     error UnexpectedTokenAllowance(Currency currency, uint256 remaining);
+    error CanonicalPoolDonationForbidden();
 
     modifier onlyDiamond() {
         if (msg.sender != crottoDiamond) revert OnlyCrottoDiamond(msg.sender);
@@ -128,6 +129,7 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         permissions.afterInitialize = true;
         permissions.beforeAddLiquidity = true;
         permissions.beforeRemoveLiquidity = true;
+        permissions.beforeDonate = true;
         permissions.beforeSwap = true;
         permissions.beforeSwapReturnDelta = true;
         permissions.afterSwap = true;
@@ -181,36 +183,38 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         emit CanonicalPoolInitialized(poolId, sqrtPriceX96, tokenAmount, wethAmount, liquidity);
     }
 
-    function donatePOL(uint256 tokenAmount, uint256 wethAmount)
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount)
         external
         override
+        onlyDiamond
         nonReentrantHook
         returns (uint128 liquidityAdded)
     {
         _enforceInitialized();
-        if (tokenAmount == 0 && wethAmount == 0) revert EmptyPOLDonation();
+        if (funder == address(0)) revert ZeroAddress();
+        if (tokenAmount == 0 && wethAmount == 0) revert EmptyPOLAddition();
 
         if (tokenAmount != 0) {
-            LibAssetTransfer.pullExact(activationToken, msg.sender, tokenAmount);
+            LibAssetTransfer.pullExact(activationToken, funder, tokenAmount);
             _creditPending(Currency.wrap(activationToken), tokenAmount);
         }
         if (wethAmount != 0) {
-            LibAssetTransfer.pullExact(weth, msg.sender, wethAmount);
+            LibAssetTransfer.pullExact(weth, funder, wethAmount);
             _creditPending(Currency.wrap(weth), wethAmount);
         }
 
-        emit POLDonated(msg.sender, tokenAmount, wethAmount);
+        emit POLAdded(funder, tokenAmount, wethAmount);
         liquidityAdded = _compoundThroughUnlock();
     }
 
     /// @notice Credits finalized round WETH to permanent-liquidity pending without invoking PoolManager.
     function creditPOLWeth(uint256 wethAmount) external override onlyDiamond nonReentrantHook {
         _enforceInitialized();
-        if (wethAmount == 0) revert EmptyPOLDonation();
+        if (wethAmount == 0) revert EmptyPOLAddition();
         LibAssetTransfer.pullExact(weth, msg.sender, wethAmount);
         _creditPending(Currency.wrap(weth), wethAmount);
         _assertPendingSolvency(Currency.wrap(weth));
-        emit POLDonated(msg.sender, 0, wethAmount);
+        emit POLWethCredited(wethAmount);
     }
 
     function compoundPOL() external override nonReentrantHook returns (uint128 liquidityAdded) {
@@ -293,6 +297,15 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         revert PermanentLiquidityRemovalForbidden();
     }
 
+    function _beforeDonate(address, PoolKey calldata, uint256, uint256, bytes calldata)
+        internal
+        pure
+        override
+        returns (bytes4)
+    {
+        revert CanonicalPoolDonationForbidden();
+    }
+
     function _beforeSwap(address, PoolKey calldata key, SwapParams calldata params, bytes calldata)
         internal
         override
@@ -370,8 +383,6 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
 
     function _compoundUnlocked() private returns (uint128 liquidityAdded) {
         PoolKey memory key = _canonicalPoolKey;
-        if (_lockedLiquidity != 0) _collectPositionFees(key);
-
         uint256 available0 = _polPending[key.currency0];
         uint256 available1 = _polPending[key.currency1];
         if (available0 == 0 || available1 == 0) return 0;
@@ -398,8 +409,8 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
         (BalanceDelta delta,) = poolManager.modifyLiquidity(key, params, "");
         _liquidityModificationActive = false;
 
-        (uint256 amount0, uint256 collected0) = _applyLiquidityDelta(key.currency0, delta.amount0(), available0);
-        (uint256 amount1, uint256 collected1) = _applyLiquidityDelta(key.currency1, delta.amount1(), available1);
+        (uint256 amount0,) = _applyLiquidityDelta(key.currency0, delta.amount0(), available0);
+        (uint256 amount1,) = _applyLiquidityDelta(key.currency1, delta.amount1(), available1);
         _lockedLiquidity += liquidityAdded;
 
         emit PermanentLiquidityAdded(
@@ -408,37 +419,6 @@ contract CrottoSwapFeeHook is BaseHook, ICrottoSwapFeeHook, IUnlockCallback {
             Currency.unwrap(key.currency0) == activationToken ? amount0 : amount1,
             Currency.unwrap(key.currency0) == weth ? amount0 : amount1
         );
-        if (collected0 != 0 || collected1 != 0) {
-            emit PermanentLiquidityFeesCollected(
-                _canonicalPoolId,
-                Currency.unwrap(key.currency0) == activationToken ? collected0 : collected1,
-                Currency.unwrap(key.currency0) == weth ? collected0 : collected1
-            );
-        }
-    }
-
-    function _collectPositionFees(PoolKey memory key) private {
-        ModifyLiquidityParams memory params = ModifyLiquidityParams({
-            tickLower: TickMath.minUsableTick(canonicalTickSpacing),
-            tickUpper: TickMath.maxUsableTick(canonicalTickSpacing),
-            liquidityDelta: 0,
-            salt: PERMANENT_LIQUIDITY_SALT
-        });
-        _liquidityModificationActive = true;
-        (BalanceDelta delta,) = poolManager.modifyLiquidity(key, params, "");
-        _liquidityModificationActive = false;
-
-        uint256 available0 = _polPending[key.currency0];
-        uint256 available1 = _polPending[key.currency1];
-        (, uint256 collected0) = _applyLiquidityDelta(key.currency0, delta.amount0(), available0);
-        (, uint256 collected1) = _applyLiquidityDelta(key.currency1, delta.amount1(), available1);
-        if (collected0 != 0 || collected1 != 0) {
-            emit PermanentLiquidityFeesCollected(
-                _canonicalPoolId,
-                Currency.unwrap(key.currency0) == activationToken ? collected0 : collected1,
-                Currency.unwrap(key.currency0) == weth ? collected0 : collected1
-            );
-        }
     }
 
     function _applyLiquidityDelta(Currency currency, int128 delta, uint256 available)

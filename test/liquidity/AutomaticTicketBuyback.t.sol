@@ -106,8 +106,8 @@ abstract contract AutomaticTicketBuybackFixture is Test {
     using StateLibrary for IPoolManager;
 
     uint160 private constant REQUIRED_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
+        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_DONATE_FLAG | Hooks.BEFORE_SWAP_FLAG
+        | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
     uint256 internal constant TICKET_PRICE = 1 ether;
     uint256 internal constant OPERATIONS_FEE = 0.01 ether;
     uint256 internal constant TICKET_TARGET = 100;
@@ -561,8 +561,7 @@ contract AutomaticTicketBuybackTest is AutomaticTicketBuybackFixture {
         vm.startPrank(treasury);
         token.approve(address(hook), 1_000 ether);
         vm.stopPrank();
-        vm.prank(treasury);
-        hook.donatePOL(1_000 ether, 0);
+        governance.addPOL(treasury, 1_000 ether, 0);
         hook.compoundPOL();
         assertTrue(hook.poolInitialized());
     }

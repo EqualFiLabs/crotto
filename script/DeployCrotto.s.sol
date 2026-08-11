@@ -47,8 +47,8 @@ struct CrottoDeploymentPlan {
 contract DeployCrotto is CrottoScriptBase {
     uint160 private constant REQUIRED_HOOK_FLAGS = uint160(
         Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG
-            | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-            | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
+            | Hooks.BEFORE_DONATE_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.AFTER_SWAP_FLAG
+            | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG
     );
 
     string[15] private facetNames = [

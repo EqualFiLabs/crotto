@@ -81,6 +81,7 @@ contract FinalImmutabilityTest is Test {
         assertNotEq(loupe.facetAddress(ICrotto.buyTickets.selector), address(0));
         assertNotEq(loupe.facetAddress(ICrotto.claimWinnings.selector), address(0));
         assertNotEq(loupe.facetAddress(ICrottoGovernance.setRoundConfiguration.selector), address(0));
+        assertNotEq(loupe.facetAddress(ICrottoGovernance.addPOL.selector), address(0));
         assertNotEq(loupe.facetAddress(ICrottoGovernance.pauseActions.selector), address(0));
         assertEq(IERC173(address(diamond)).owner(), ownerBefore);
 
