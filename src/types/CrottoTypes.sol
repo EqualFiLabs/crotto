@@ -56,6 +56,7 @@ struct RoundConfiguration {
     uint256 playerRewardRate;
     uint256 ticketTarget;
     uint256 maxVrfCost;
+    /// @dev Counted in Ethereum blocks, not seconds or timestamps.
     uint256 vrfTimeoutBlocks;
     uint256 requestCallerReward;
     uint256 finalizationCallerReward;
