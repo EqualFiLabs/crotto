@@ -9,7 +9,14 @@ import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
 import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
 import {LibVaultStorage} from "../../libraries/storage/LibVaultStorage.sol";
-import {ProtocolAccountingView, RequestRecord, Round, RoundSettlement, TicketBatch} from "../../types/CrottoTypes.sol";
+import {
+    ProtocolAccountingView,
+    RequestRecord,
+    Round,
+    RoundSettlement,
+    RoundStatus,
+    TicketBatch
+} from "../../types/CrottoTypes.sol";
 
 /// @notice Bounded round, ticket-batch, player, and randomness-attempt views.
 contract LotteryViewFacet {
@@ -82,9 +89,11 @@ contract LotteryViewFacet {
         _enforceRoundExists(roundId);
         LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
         LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
+        if (lottery.rounds[roundId].status != RoundStatus.Expired) return (0, 0, false);
+        claimed = settlements.refundClaimed[roundId][buyer];
+        if (claimed) return (0, 0, true);
         ticketRefundWeth = lottery.playerTicketCounts[roundId][buyer] * lottery.rounds[roundId].config.ticketPrice;
         builderRefundEth = settlements.builderRefundEth[roundId][buyer];
-        claimed = settlements.refundClaimed[roundId][buyer];
     }
 
     function protocolAccounting() external view returns (ProtocolAccountingView memory accounting) {

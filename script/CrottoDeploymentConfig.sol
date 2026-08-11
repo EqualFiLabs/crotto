@@ -161,6 +161,9 @@ contract CrottoDeploymentConfig is Script {
             if (configuration.proposers[i] == address(0)) revert MissingProposer();
         }
         LibCrottoValidation.validateRoundConfiguration(configuration.round);
+        LibCrottoValidation.validateVrfTimeout(
+            configuration.round.vrfTimeoutBlocks, configuration.vrfRequestConfirmations
+        );
         LibCrottoValidation.validateBootstrapReachability(configuration.round, configuration.requiredBootstrapWeth);
         LibCrottoValidation.validateActivationConfiguration(configuration.activation, configuration.rewardNFTMaxSupply);
         LibCrottoValidation.validateHookConfiguration(configuration.hook, configuration.maxCombinedHookFeeBps);

@@ -249,6 +249,11 @@ contract LotteryFinalizationTest is Test {
 
     function test_ClosedRoundExpiresAfterTimeoutAndRefundsTicketPrice() public {
         _sellOut();
+        (uint256 unavailableWeth, uint256 unavailableBuilderFee, bool unavailableClaimed) =
+            views.expiredRoundRefund(1, playerA);
+        assertEq(unavailableWeth, 0);
+        assertEq(unavailableBuilderFee, 0);
+        assertFalse(unavailableClaimed);
         uint256 firstExpirableBlock = block.number + views.round(1).config.vrfTimeoutBlocks + 1;
         vm.roll(firstExpirableBlock - 1);
         vm.expectRevert(
@@ -264,9 +269,17 @@ contract LotteryFinalizationTest is Test {
         assertEq(uint8(views.round(1).status), uint8(RoundStatus.Expired));
         assertEq(views.currentRoundId(), 2);
         assertEq(operations.callerCredit(finalizer), 0.3 ether);
+        (uint256 claimableWeth, uint256 claimableBuilderFee, bool claimed) = views.expiredRoundRefund(1, playerA);
+        assertEq(claimableWeth, 2 ether);
+        assertEq(claimableBuilderFee, 0);
+        assertFalse(claimed);
 
         vm.prank(playerA);
         (uint256 playerAWeth,) = finalization.claimExpiredRoundRefund(1, playerA, address(0));
+        (claimableWeth, claimableBuilderFee, claimed) = views.expiredRoundRefund(1, playerA);
+        assertEq(claimableWeth, 0);
+        assertEq(claimableBuilderFee, 0);
+        assertTrue(claimed);
         vm.prank(playerB);
         (uint256 playerBWeth,) = finalization.claimExpiredRoundRefund(1, playerB, address(0));
         assertEq(playerAWeth, 2 ether);
@@ -513,7 +526,7 @@ contract LotteryFinalizationTest is Test {
     }
 
     function _viewSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](9);
+        selectors = new bytes4[](10);
         selectors[0] = LotteryViewFacet.currentRoundId.selector;
         selectors[1] = LotteryViewFacet.round.selector;
         selectors[2] = LotteryViewFacet.remainingTickets.selector;
@@ -523,6 +536,7 @@ contract LotteryFinalizationTest is Test {
         selectors[6] = LotteryViewFacet.playerRewardClaimed.selector;
         selectors[7] = LotteryViewFacet.playerRewardEntitlement.selector;
         selectors[8] = LotteryViewFacet.requestRecord.selector;
+        selectors[9] = LotteryViewFacet.expiredRoundRefund.selector;
     }
 
     function _operationsSelectors() private pure returns (bytes4[] memory selectors) {

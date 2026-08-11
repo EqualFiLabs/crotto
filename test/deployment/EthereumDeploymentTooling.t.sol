@@ -8,6 +8,8 @@ import {
     EthereumTarget
 } from "../../script/CrottoDeploymentConfig.sol";
 import {CrottoScriptBase} from "../../script/CrottoScriptBase.sol";
+import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
+import {LibCrottoValidation} from "../../src/libraries/LibCrottoValidation.sol";
 
 contract CrottoScriptBaseHarness is CrottoScriptBase {}
 
@@ -94,6 +96,23 @@ contract EthereumDeploymentToolingTest is Test {
         configuration.enforceRuntimeCodeHashes = false;
 
         vm.expectRevert(CrottoDeploymentConfig.RuntimeCodeHashEnforcementRequired.selector);
+        configurationReader.validateEconomics(configuration);
+    }
+
+    function test_RejectsSepoliaConfigurationWithVrfTimeoutBelowConfirmations() public {
+        CrottoDeploymentConfiguration memory configuration = configurationReader.loadConfiguration(
+            string.concat(vm.projectRoot(), "/script/config/sepolia-rehearsal.json")
+        );
+        configuration.round.vrfTimeoutBlocks = configuration.vrfRequestConfirmations + 1;
+
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                LibCrottoValidation.InvalidVrfTimeout.selector,
+                configuration.round.vrfTimeoutBlocks,
+                uint256(configuration.vrfRequestConfirmations) + 2,
+                CrottoConstants.MAX_VRF_TIMEOUT_BLOCKS
+            )
+        );
         configurationReader.validateEconomics(configuration);
     }
 
