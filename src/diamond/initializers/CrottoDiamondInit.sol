@@ -201,6 +201,7 @@ contract CrottoDiamondInit {
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setRoundConfiguration.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setActivationConfiguration.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setHookConfiguration.selector);
+        LibDiamond.enforceSelectorExists(ICrottoGovernance.addPOL.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setBuybackConfiguration.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setTreasuryReceiver.selector);
         LibDiamond.enforceSelectorExists(ICrottoGovernance.setGuardian.selector);

@@ -577,7 +577,7 @@ contract CrottoProtocolHandler is Test {
         }
     }
 
-    function donatePOL(uint256 actorSeed, uint256 tokenSeed, uint256 wethSeed) external {
+    function addPOL(uint256 actorSeed, uint256 tokenSeed, uint256 wethSeed) external {
         if (!pol.polInitialized()) return;
         address actor = _actor(actorSeed);
         uint256 tokenMaximum = _min(token.balanceOf(actor), 1_000 ether);
@@ -587,8 +587,7 @@ contract CrottoProtocolHandler is Test {
         if (tokenAmount == 0 && wethAmount == 0) return;
         uint256 tokenBefore = token.balanceOf(actor);
         uint256 wethBefore = weth.balanceOf(actor);
-        vm.prank(actor);
-        try hook.donatePOL(tokenAmount, wethAmount) returns (uint128) {
+        try governance.addPOL(actor, tokenAmount, wethAmount) returns (uint128) {
             if (tokenBefore - token.balanceOf(actor) != tokenAmount) purchaseRollbackViolation = true;
             if (wethBefore - weth.balanceOf(actor) != wethAmount) purchaseRollbackViolation = true;
             _observeLiquidity();
@@ -835,7 +834,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         selectors[12] = CrottoProtocolHandler.activateRewardNFT.selector;
         selectors[13] = CrottoProtocolHandler.transferRewardNFT.selector;
         selectors[14] = CrottoProtocolHandler.claimNFTReward.selector;
-        selectors[15] = CrottoProtocolHandler.donatePOL.selector;
+        selectors[15] = CrottoProtocolHandler.addPOL.selector;
         selectors[16] = CrottoProtocolHandler.compoundPOL.selector;
         selectors[17] = CrottoProtocolHandler.swap.selector;
         selectors[18] = CrottoProtocolHandler.setBuybackConfiguration.selector;

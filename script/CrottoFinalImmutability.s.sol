@@ -76,6 +76,7 @@ abstract contract CrottoFinalImmutability is CrottoScriptBase {
         _requireSelector(loupe, ICrottoBuilderFees.claimBuilderFees.selector);
         _requireSelector(loupe, ICrotto.finalizeLottery.selector);
         _requireSelector(loupe, ICrottoGovernance.setRoundConfiguration.selector);
+        _requireSelector(loupe, ICrottoGovernance.addPOL.selector);
         _requireSelector(loupe, IPOLInitialization.initializePOL.selector);
         if (IERC173(diamond).owner() != timelock) revert DiamondOwnershipChanged(timelock, IERC173(diamond).owner());
 

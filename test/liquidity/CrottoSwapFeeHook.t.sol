@@ -60,6 +60,10 @@ contract CrottoHookController is RewardAccountingFacet {
         ICrottoSwapFeeHook(hook).setHookConfiguration(configuration);
     }
 
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount) external returns (uint128 liquidityAdded) {
+        liquidityAdded = ICrottoSwapFeeHook(hook).addPOL(funder, tokenAmount, wethAmount);
+    }
+
     function setTotalActiveWeight(uint256 weight) external {
         LibRewardAccounting.setPositionWeight(1, weight == 0 ? 0 : 1, weight);
     }
@@ -280,6 +284,10 @@ contract AdversarialHookController {
         ICrottoSwapFeeHook(hook).setHookConfiguration(configuration);
     }
 
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount) external returns (uint128 liquidityAdded) {
+        liquidityAdded = ICrottoSwapFeeHook(hook).addPOL(funder, tokenAmount, wethAmount);
+    }
+
     function setRewardMode(bool active, bool leaveAllowance) external {
         activeRewards = active;
         leaveRewardAllowance = leaveAllowance;
@@ -317,8 +325,8 @@ contract CrottoSwapFeeHookTest is Test {
     using StateLibrary for IPoolManager;
 
     uint160 private constant REQUIRED_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
+        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_DONATE_FLAG | Hooks.BEFORE_SWAP_FLAG
+        | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
     uint256 private constant REQUIRED_WETH = 30 ether;
     uint256 private constant TOKEN_PER_WETH_WAD = 10_000 ether;
     int24 private constant TICK_SPACING = 60;
@@ -382,6 +390,7 @@ contract CrottoSwapFeeHookTest is Test {
         assertTrue(permissions.afterInitialize);
         assertTrue(permissions.beforeAddLiquidity);
         assertTrue(permissions.beforeRemoveLiquidity);
+        assertTrue(permissions.beforeDonate);
         assertTrue(permissions.beforeSwap);
         assertTrue(permissions.beforeSwapReturnDelta);
         assertTrue(permissions.afterSwap);
@@ -461,25 +470,31 @@ contract CrottoSwapFeeHookTest is Test {
         assertEq(hook.lockedLiquidity(), lockedBefore);
     }
 
-    function test_PermissionlessOneAndTwoAssetDonationsCreateNoWithdrawablePosition() public {
+    function test_GovernedOneAndTwoAssetAdditionsCreateNoWithdrawablePosition() public {
         _initialize(REQUIRED_WETH);
         uint128 initialLiquidity = hook.lockedLiquidity();
 
-        hook.donatePOL(1_000 ether, 0);
+        controller.addPOL(address(this), 1_000 ether, 0);
         assertGt(hook.pendingPermanentLiquidity(Currency.wrap(address(token))), 0);
         _assertPendingSolvent(Currency.wrap(address(token)));
 
         _mintWeth(1 ether);
-        hook.donatePOL(0, 1 ether);
+        controller.addPOL(address(this), 0, 1 ether);
         assertGt(hook.lockedLiquidity(), initialLiquidity);
         _assertPendingSolvent(Currency.wrap(address(token)));
         _assertPendingSolvent(Currency.wrap(address(wethToken)));
 
-        vm.expectRevert(CrottoSwapFeeHook.EmptyPOLDonation.selector);
-        hook.donatePOL(0, 0);
+        vm.expectRevert(CrottoSwapFeeHook.EmptyPOLAddition.selector);
+        controller.addPOL(address(this), 0, 0);
     }
 
-    function test_DonationsPullExactAssetsWithoutCreatingAllowanceOrClaims() public {
+    function test_HookAdditionIsDiamondOnly() public {
+        _initialize(REQUIRED_WETH);
+        vm.expectRevert(abi.encodeWithSelector(CrottoSwapFeeHook.OnlyCrottoDiamond.selector, address(this)));
+        hook.addPOL(address(this), 1 ether, 0);
+    }
+
+    function test_GovernedAdditionsPullExactAssetsWithoutCreatingAllowanceOrClaims() public {
         _initialize(REQUIRED_WETH);
         _mintWeth(2 ether);
         uint256 tokenBefore = token.balanceOf(address(this));
@@ -487,7 +502,7 @@ contract CrottoSwapFeeHookTest is Test {
         uint256 controllerTokenBefore = token.balanceOf(address(controller));
         uint256 controllerWethBefore = wethToken.balanceOf(address(controller));
 
-        hook.donatePOL(2_000 ether, 2 ether);
+        controller.addPOL(address(this), 2_000 ether, 2 ether);
 
         assertEq(tokenBefore - token.balanceOf(address(this)), 2_000 ether);
         assertEq(wethBefore - wethToken.balanceOf(address(this)), 2 ether);
@@ -499,75 +514,56 @@ contract CrottoSwapFeeHookTest is Test {
         _assertPendingSolvent(Currency.wrap(address(wethToken)));
     }
 
-    function test_TokenHeavyDonationKeepsUnmatchedValueForLaterCompounding() public {
+    function test_TokenHeavyAdditionKeepsUnmatchedValueForLaterCompounding() public {
         _initialize(REQUIRED_WETH);
         uint128 liquidityBefore = hook.lockedLiquidity();
 
-        hook.donatePOL(500_000 ether, 0);
+        controller.addPOL(address(this), 500_000 ether, 0);
         uint256 unmatchedToken = hook.pendingPermanentLiquidity(Currency.wrap(address(token)));
         assertGt(unmatchedToken, 400_000 ether);
 
         _mintWeth(1 ether);
-        hook.donatePOL(0, 1 ether);
+        controller.addPOL(address(this), 0, 1 ether);
         assertGt(hook.lockedLiquidity(), liquidityBefore);
         assertLt(hook.pendingPermanentLiquidity(Currency.wrap(address(token))), unmatchedToken);
         _assertPendingSolvent(Currency.wrap(address(token)));
         _assertPendingSolvent(Currency.wrap(address(wethToken)));
     }
 
-    function test_WethHeavyDonationKeepsUnmatchedValueForLaterCompounding() public {
+    function test_WethHeavyAdditionKeepsUnmatchedValueForLaterCompounding() public {
         _initialize(REQUIRED_WETH);
         uint128 liquidityBefore = hook.lockedLiquidity();
         _mintWeth(50 ether);
 
-        hook.donatePOL(0, 50 ether);
+        controller.addPOL(address(this), 0, 50 ether);
         uint256 unmatchedWeth = hook.pendingPermanentLiquidity(Currency.wrap(address(wethToken)));
         assertGt(unmatchedWeth, 49 ether);
 
-        hook.donatePOL(1_000 ether, 0);
+        controller.addPOL(address(this), 1_000 ether, 0);
         assertGt(hook.lockedLiquidity(), liquidityBefore);
         assertLt(hook.pendingPermanentLiquidity(Currency.wrap(address(wethToken))), unmatchedWeth);
         _assertPendingSolvent(Currency.wrap(address(token)));
         _assertPendingSolvent(Currency.wrap(address(wethToken)));
     }
 
-    function test_BackupCompoundingCollectsDonatedPositionFeesIntoPermanentLiquidity() public {
+    function test_NativeCanonicalPoolDonationAlwaysReverts() public {
         _initialize(REQUIRED_WETH);
-        uint128 liquidityBefore = hook.lockedLiquidity();
-        _mintWeth(2 ether);
-
         bool tokenIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(token);
-        donateRouter.donate(
-            canonicalKey, tokenIsCurrency0 ? 1_000 ether : 1 ether, tokenIsCurrency0 ? 1 ether : 1_000 ether, ""
+        vm.expectRevert(
+            _wrappedHookRevert(
+                IHooks.beforeDonate.selector,
+                abi.encodeWithSelector(CrottoSwapFeeHook.CanonicalPoolDonationForbidden.selector)
+            )
         );
-        uint128 liquidityAdded = hook.compoundPOL();
+        donateRouter.donate(canonicalKey, tokenIsCurrency0 ? 1 ether : 0, tokenIsCurrency0 ? 0 : 1 ether, "");
 
-        assertGt(liquidityAdded, 0);
-        assertGt(hook.lockedLiquidity(), liquidityBefore);
-        _assertPendingSolvent(Currency.wrap(address(token)));
-        _assertPendingSolvent(Currency.wrap(address(wethToken)));
-    }
-
-    function test_PermanentPositionFeesRemainPOLAndLeaveOtherBooksUntouched() public {
-        _initialize(REQUIRED_WETH);
-        controller.seedIsolatedAccounting(address(this));
-        bytes32 accountingBefore = controller.isolatedAccountingDigest(address(this));
-        address treasury = controller.treasuryReceiver();
-        uint256 treasuryTokenBefore = token.balanceOf(treasury);
-        uint256 treasuryWethBefore = wethToken.balanceOf(treasury);
-        uint256 pendingTokenBefore = hook.pendingPermanentLiquidity(Currency.wrap(address(token)));
-
-        uint256 positionFee = 100_000 ether;
-        bool tokenIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(token);
-        donateRouter.donate(canonicalKey, tokenIsCurrency0 ? positionFee : 0, tokenIsCurrency0 ? 0 : positionFee, "");
-        hook.compoundPOL();
-
-        assertGt(hook.pendingPermanentLiquidity(Currency.wrap(address(token))), pendingTokenBefore);
-        assertEq(controller.isolatedAccountingDigest(address(this)), accountingBefore);
-        assertEq(token.balanceOf(treasury), treasuryTokenBefore);
-        assertEq(wethToken.balanceOf(treasury), treasuryWethBefore);
-        _assertPendingSolvent(Currency.wrap(address(token)));
-        _assertPendingSolvent(Currency.wrap(address(wethToken)));
+        vm.expectRevert(
+            _wrappedHookRevert(
+                IHooks.beforeDonate.selector,
+                abi.encodeWithSelector(CrottoSwapFeeHook.CanonicalPoolDonationForbidden.selector)
+            )
+        );
+        donateRouter.donate(canonicalKey, 1 ether, 1 ether, "");
     }
 
     function _wrappedHookRevert(bytes4 selector, bytes memory reason) private view returns (bytes memory) {
@@ -619,9 +615,9 @@ contract CrottoSwapFeeHookTest is Test {
         _assertBilateralSwap(false, false, false);
     }
 
-    function test_DonationAndCompoundingRequireInitializedPool() public {
+    function test_AdditionAndCompoundingRequireInitializedPool() public {
         vm.expectRevert(CrottoSwapFeeHook.CanonicalPoolNotInitialized.selector);
-        hook.donatePOL(1, 0);
+        controller.addPOL(address(this), 1, 0);
         vm.expectRevert(CrottoSwapFeeHook.CanonicalPoolNotInitialized.selector);
         hook.compoundPOL();
     }
@@ -742,8 +738,8 @@ contract CrottoSwapFeeHookAdversarialTest is Test {
     using PoolIdLibrary for PoolKey;
 
     uint160 private constant REQUIRED_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
+        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_DONATE_FLAG | Hooks.BEFORE_SWAP_FLAG
+        | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
     uint256 private constant REQUIRED_WETH = 30 ether;
     uint256 private constant TOKEN_PER_WETH_WAD = 10_000 ether;
     int24 private constant TICK_SPACING = 60;
@@ -815,11 +811,11 @@ contract CrottoSwapFeeHookAdversarialTest is Test {
         assertEq(token.allowance(address(hook), address(controller)), 0, "rollback clears approval");
     }
 
-    function test_UnexpectedSettlementRevertsDonationCompounding() public {
+    function test_UnexpectedSettlementRevertsGovernedAdditionCompounding() public {
         _mintWeth(1 ether);
         vm.mockCall(address(manager), abi.encodeWithSelector(IPoolManager.settle.selector), abi.encode(uint256(0)));
         vm.expectPartialRevert(CrottoSwapFeeHook.UnexpectedSettlement.selector);
-        hook.donatePOL(1_000 ether, 1 ether);
+        controller.addPOL(address(this), 1_000 ether, 1 ether);
         vm.clearMockedCalls();
     }
 

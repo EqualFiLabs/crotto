@@ -17,21 +17,16 @@ import {LibCanonicalPool} from "../../src/libraries/LibCanonicalPool.sol";
 import {CrottoSwapFeeHook} from "../../src/liquidity/CrottoSwapFeeHook.sol";
 import {ActivationToken} from "../../src/token/ActivationToken.sol";
 import {HookConfiguration} from "../../src/types/CrottoTypes.sol";
-import {
-    CrottoHookController,
-    IPoolDonateRouter,
-    IPoolSwapRouter,
-    IV4TestDeployment
-} from "../liquidity/CrottoSwapFeeHook.t.sol";
+import {CrottoHookController, IPoolSwapRouter, IV4TestDeployment} from "../liquidity/CrottoSwapFeeHook.t.sol";
 
 contract POLAccountingHandler is Test {
     uint256 private constant MAX_TOKEN_ACTION = 10_000 ether;
     uint256 private constant MAX_WETH_ACTION = 1 ether;
 
     CrottoSwapFeeHook public immutable HOOK;
+    CrottoHookController public immutable CONTROLLER;
     ActivationToken public immutable TOKEN;
     WETH9 public immutable WETH;
-    IPoolDonateRouter public immutable DONATE_ROUTER;
     IPoolSwapRouter public immutable SWAP_ROUTER;
     PoolKey private canonicalKey;
     bool private tokenIsCurrency0;
@@ -43,16 +38,16 @@ contract POLAccountingHandler is Test {
 
     constructor(
         CrottoSwapFeeHook hook_,
+        CrottoHookController controller_,
         ActivationToken token_,
         WETH9 weth_,
-        IPoolDonateRouter donateRouter_,
         IPoolSwapRouter swapRouter_,
         PoolKey memory canonicalKey_
     ) {
         HOOK = hook_;
+        CONTROLLER = controller_;
         TOKEN = token_;
         WETH = weth_;
-        DONATE_ROUTER = donateRouter_;
         SWAP_ROUTER = swapRouter_;
         canonicalKey = canonicalKey_;
         tokenIsCurrency0 = Currency.unwrap(canonicalKey_.currency0) == address(token_);
@@ -60,24 +55,22 @@ contract POLAccountingHandler is Test {
         lastLockedLiquidity = INITIAL_LOCKED_LIQUIDITY;
 
         token_.approve(address(hook_), type(uint256).max);
-        token_.approve(address(donateRouter_), type(uint256).max);
         token_.approve(address(swapRouter_), type(uint256).max);
         weth_.approve(address(hook_), type(uint256).max);
-        weth_.approve(address(donateRouter_), type(uint256).max);
         weth_.approve(address(swapRouter_), type(uint256).max);
     }
 
-    function donateToken(uint256 amountSeed) external {
+    function addToken(uint256 amountSeed) external {
         uint256 amount = _boundedBalanceAmount(TOKEN.balanceOf(address(this)), amountSeed, MAX_TOKEN_ACTION);
         if (amount == 0) return;
-        HOOK.donatePOL(amount, 0);
+        CONTROLLER.addPOL(address(this), amount, 0);
         _observeLiquidity();
     }
 
-    function donateWeth(uint256 amountSeed) external {
+    function addWeth(uint256 amountSeed) external {
         uint256 amount = _boundedBalanceAmount(WETH.balanceOf(address(this)), amountSeed, MAX_WETH_ACTION);
         if (amount == 0) return;
-        HOOK.donatePOL(0, amount);
+        CONTROLLER.addPOL(address(this), 0, amount);
         _observeLiquidity();
     }
 
@@ -127,19 +120,6 @@ contract POLAccountingHandler is Test {
         _observeLiquidity();
     }
 
-    function donatePositionFees(uint256 currencySeed, uint256 amountSeed) external {
-        bool donateTokenSide = currencySeed % 2 == 0;
-        uint256 balance = donateTokenSide ? TOKEN.balanceOf(address(this)) : WETH.balanceOf(address(this));
-        uint256 ceiling = donateTokenSide ? MAX_TOKEN_ACTION : MAX_WETH_ACTION;
-        uint256 amount = _boundedBalanceAmount(balance, amountSeed, ceiling);
-        if (amount == 0) return;
-
-        uint256 amount0 = donateTokenSide == tokenIsCurrency0 ? amount : 0;
-        uint256 amount1 = donateTokenSide == tokenIsCurrency0 ? 0 : amount;
-        DONATE_ROUTER.donate(canonicalKey, amount0, amount1, "");
-        _observeLiquidity();
-    }
-
     function compound() external {
         HOOK.compoundPOL();
         _observeLiquidity();
@@ -162,8 +142,8 @@ contract POLAccountingInvariantTest is StdInvariant, Test {
     using PoolIdLibrary for PoolKey;
 
     uint160 private constant REQUIRED_FLAGS = Hooks.AFTER_INITIALIZE_FLAG | Hooks.BEFORE_ADD_LIQUIDITY_FLAG
-        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_SWAP_FLAG | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG
-        | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
+        | Hooks.BEFORE_REMOVE_LIQUIDITY_FLAG | Hooks.BEFORE_DONATE_FLAG | Hooks.BEFORE_SWAP_FLAG
+        | Hooks.BEFORE_SWAP_RETURNS_DELTA_FLAG | Hooks.AFTER_SWAP_FLAG | Hooks.AFTER_SWAP_RETURNS_DELTA_FLAG;
     uint256 private constant REQUIRED_WETH = 30 ether;
     uint256 private constant TOKEN_PER_WETH_WAD = 10_000 ether;
     int24 private constant TICK_SPACING = 60;
@@ -213,19 +193,17 @@ contract POLAccountingInvariantTest is StdInvariant, Test {
             REQUIRED_WETH
         );
 
-        handler = new POLAccountingHandler(
-            hook, token, weth, IPoolDonateRouter(v4.donateRouter()), IPoolSwapRouter(v4.swapRouter()), canonicalKey
-        );
+        handler =
+            new POLAccountingHandler(hook, controller, token, weth, IPoolSwapRouter(v4.swapRouter()), canonicalKey);
         assertTrue(token.transfer(address(handler), 5_000_000 ether));
         assertTrue(weth.transfer(address(handler), 1_000 ether));
 
-        bytes4[] memory selectors = new bytes4[](6);
-        selectors[0] = POLAccountingHandler.donateToken.selector;
-        selectors[1] = POLAccountingHandler.donateWeth.selector;
+        bytes4[] memory selectors = new bytes4[](5);
+        selectors[0] = POLAccountingHandler.addToken.selector;
+        selectors[1] = POLAccountingHandler.addWeth.selector;
         selectors[2] = POLAccountingHandler.swapExactInput.selector;
         selectors[3] = POLAccountingHandler.swapExactOutput.selector;
-        selectors[4] = POLAccountingHandler.donatePositionFees.selector;
-        selectors[5] = POLAccountingHandler.compound.selector;
+        selectors[4] = POLAccountingHandler.compound.selector;
         targetContract(address(handler));
         targetSelector(FuzzSelector({addr: address(handler), selectors: selectors}));
     }

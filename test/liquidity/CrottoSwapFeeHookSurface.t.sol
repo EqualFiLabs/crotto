@@ -62,7 +62,7 @@ contract CrottoSwapFeeHookSurfaceTest is Test {
         expected[14] = "compoundPOL()";
         expected[15] = "creditPOLWeth(uint256)";
         expected[16] = "crottoDiamond()";
-        expected[17] = "donatePOL(uint256,uint256)";
+        expected[17] = "addPOL(address,uint256,uint256)";
         expected[18] = "getHookPermissions()";
         expected[19] = "hookConfiguration()";
         expected[20] = "initialTokenPerWethWad()";

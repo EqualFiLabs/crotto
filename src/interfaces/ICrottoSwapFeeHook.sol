@@ -22,8 +22,8 @@ interface ICrottoSwapFeeHook {
         uint256 treasuryAmount
     );
     event PermanentLiquidityAdded(PoolId indexed poolId, uint128 liquidityAdded, uint256 tokenUsed, uint256 wethUsed);
-    event PermanentLiquidityFeesCollected(PoolId indexed poolId, uint256 tokenAmount, uint256 wethAmount);
-    event POLDonated(address indexed donor, uint256 tokenAmount, uint256 wethAmount);
+    event POLAdded(address indexed funder, uint256 tokenAmount, uint256 wethAmount);
+    event POLWethCredited(uint256 wethAmount);
     function setHookConfiguration(HookConfiguration calldata configuration) external;
 
     function initializeCanonicalPool(
@@ -33,7 +33,7 @@ interface ICrottoSwapFeeHook {
         uint256 wethAmount
     ) external returns (PoolId poolId, uint128 liquidity);
 
-    function donatePOL(uint256 tokenAmount, uint256 wethAmount) external returns (uint128 liquidityAdded);
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount) external returns (uint128 liquidityAdded);
 
     function creditPOLWeth(uint256 wethAmount) external;
 

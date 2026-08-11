@@ -43,13 +43,16 @@ contracts for only these supported updates:
 - round configuration;
 - automatic-buyback chunk and caller-tip settings;
 - external treasury receiver; and
-- canonical-hook fees and allocations.
+- canonical-hook fees and allocations; and
+- exact externally funded POL additions.
 
 Each operation reads the same reviewed configuration file, requires the Diamond
 to be owned by the configured timelock, uses a caller-supplied operation salt,
 and verifies timelock state after scheduling or execution. There is no generic
-arbitrary-call script and no governance helper for treasury spending, ticket
-buybacks, or permissionless POL donations.
+arbitrary-call script and no governance helper for treasury spending or ticket
+buyback execution. Native Uniswap v4 donations are forbidden; a POL addition
+uses the typed `addPOL` operation and commits to one named funder and exact TOKEN
+and WETH amounts.
 
 Example:
 
@@ -63,6 +66,19 @@ export OPERATION_SALT=0xUniqueBytes32Salt
 
 forge script script/CrottoGovernanceOperations.s.sol:ScheduleRoundConfiguration --rpc-url "$RPC_URL" --broadcast
 forge script script/CrottoGovernanceOperations.s.sol:ExecuteRoundConfiguration --rpc-url "$RPC_URL" --broadcast
+```
+
+Before scheduling a POL addition, the external funder must approve the canonical
+hook for at least `POL_TOKEN_AMOUNT` CROTTO and `POL_WETH_AMOUNT` WETH. The
+timelock never takes custody of those assets. Schedule and execute with:
+
+```bash
+export POL_FUNDER=0xExternalFundingAccount
+export POL_TOKEN_AMOUNT=0
+export POL_WETH_AMOUNT=1000000000000000000
+
+forge script script/CrottoGovernanceOperations.s.sol:SchedulePOLAddition --rpc-url "$RPC_URL" --broadcast
+forge script script/CrottoGovernanceOperations.s.sol:ExecutePOLAddition --rpc-url "$RPC_URL" --broadcast
 ```
 
 Reviewed configuration files must remain under `script/config`, which is the

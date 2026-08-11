@@ -25,6 +25,8 @@ interface ICrottoGovernance {
 
     function setHookConfiguration(HookConfiguration calldata configuration) external;
 
+    function addPOL(address funder, uint256 tokenAmount, uint256 wethAmount) external returns (uint128 liquidityAdded);
+
     function setBuybackConfiguration(BuybackConfiguration calldata configuration) external;
 
     function setTreasuryReceiver(address newReceiver) external;

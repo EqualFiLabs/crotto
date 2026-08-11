@@ -127,3 +127,25 @@ contract ExecuteHookConfiguration is CrottoGovernanceOperation {
         }
     }
 }
+
+contract SchedulePOLAddition is CrottoGovernanceOperation {
+    function run() external returns (bytes32) {
+        return _schedule(
+            abi.encodeCall(
+                ICrottoGovernance.addPOL,
+                (vm.envAddress("POL_FUNDER"), vm.envUint("POL_TOKEN_AMOUNT"), vm.envUint("POL_WETH_AMOUNT"))
+            )
+        );
+    }
+}
+
+contract ExecutePOLAddition is CrottoGovernanceOperation {
+    function run() external returns (bytes32 operationId) {
+        operationId = _execute(
+            abi.encodeCall(
+                ICrottoGovernance.addPOL,
+                (vm.envAddress("POL_FUNDER"), vm.envUint("POL_TOKEN_AMOUNT"), vm.envUint("POL_WETH_AMOUNT"))
+            )
+        );
+    }
+}
