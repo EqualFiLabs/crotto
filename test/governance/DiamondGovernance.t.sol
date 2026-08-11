@@ -687,6 +687,10 @@ contract DiamondGovernanceTest is Test {
         governance.addPOL(address(0), 1 ether, 0);
 
         vm.prank(address(timelock));
+        vm.expectRevert(abi.encodeWithSelector(GovernanceFacet.InvalidPOLFunder.selector, address(timelock)));
+        governance.addPOL(address(timelock), 1 ether, 0);
+
+        vm.prank(address(timelock));
         vm.expectRevert(abi.encodeWithSelector(GovernanceFacet.InvalidPOLFunder.selector, address(diamond)));
         governance.addPOL(address(diamond), 1 ether, 0);
 

@@ -80,7 +80,10 @@ contract GovernanceFacet is CrottoFacet, ICrottoGovernance {
     {
         LibDiamond.enforceIsContractOwner();
         LibGovernanceStorage.Layout storage state = _governanceState();
-        if (funder == address(0) || LibCrottoValidation.isProtocolAddress(funder, state.immutableConfiguration)) {
+        if (
+            funder == address(0) || funder == LibDiamond.contractOwner()
+                || LibCrottoValidation.isProtocolAddress(funder, state.immutableConfiguration)
+        ) {
             revert InvalidPOLFunder(funder);
         }
 
