@@ -55,7 +55,7 @@ Example:
 ```bash
 export CROTTO_DIAMOND=0xDeployedDiamond
 export CROTTO_TIMELOCK=0xDeployedTimelock
-export CROTTO_DEPLOYMENT_CONFIG=path/to/reviewed-config.json
+export CROTTO_DEPLOYMENT_CONFIG=script/config/reviewed-config.json
 export PROPOSER=0xAuthorizedProposer
 export EXECUTOR=0xExecutionAccount
 export OPERATION_SALT=0xUniqueBytes32Salt
@@ -63,6 +63,9 @@ export OPERATION_SALT=0xUniqueBytes32Salt
 forge script script/CrottoGovernanceOperations.s.sol:ScheduleRoundConfiguration --rpc-url "$RPC_URL" --broadcast
 forge script script/CrottoGovernanceOperations.s.sol:ExecuteRoundConfiguration --rpc-url "$RPC_URL" --broadcast
 ```
+
+Reviewed configuration files must remain under `script/config`, which is the
+directory granted read access by `foundry.toml`.
 
 ## Progressive immutability
 
