@@ -5,6 +5,7 @@ import {CrottoTimelock} from "../src/governance/CrottoTimelock.sol";
 import {ICrotto} from "../src/interfaces/ICrotto.sol";
 import {ICrottoGovernance} from "../src/interfaces/ICrottoGovernance.sol";
 import {ICrottoBuilderFees} from "../src/interfaces/ICrottoBuilderFees.sol";
+import {ICrottoFinalImmutability} from "../src/interfaces/ICrottoFinalImmutability.sol";
 import {IDiamondCut} from "../src/interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../src/interfaces/diamond/IERC173.sol";
@@ -23,14 +24,8 @@ abstract contract CrottoFinalImmutability is CrottoScriptBase {
 
     function _payload(address diamond) internal view returns (bytes memory payload) {
         _requireConfirmationAndManifest(diamond);
-        IDiamondCut.FacetCut[] memory cuts = new IDiamondCut.FacetCut[](1);
-        bytes4[] memory selectors = new bytes4[](2);
-        selectors[0] = IDiamondCut.diamondCut.selector;
-        selectors[1] = IERC173.transferOwnership.selector;
-        cuts[0] = IDiamondCut.FacetCut({
-            facetAddress: address(0), action: IDiamondCut.FacetCutAction.Remove, functionSelectors: selectors
-        });
-        payload = abi.encodeCall(IDiamondCut.diamondCut, (cuts, address(0), bytes("")));
+        bytes32 expected = vm.envBytes32("EXPECTED_PRE_FINAL_MANIFEST_HASH");
+        payload = abi.encodeCall(ICrottoFinalImmutability.finalizeImmutability, (expected));
     }
 
     function _scheduleFinalCut(address diamond, CrottoTimelock timelock, bytes memory payload)
@@ -72,6 +67,9 @@ abstract contract CrottoFinalImmutability is CrottoScriptBase {
         }
         if (loupe.facetAddress(IERC173.transferOwnership.selector) != address(0)) {
             revert FinalSelectorStillInstalled(IERC173.transferOwnership.selector);
+        }
+        if (loupe.facetAddress(ICrottoFinalImmutability.finalizeImmutability.selector) != address(0)) {
+            revert FinalSelectorStillInstalled(ICrottoFinalImmutability.finalizeImmutability.selector);
         }
         _requireSelector(loupe, ICrotto.buyTickets.selector);
         _requireSelector(loupe, ICrotto.buyTicketsWithBuilder.selector);
