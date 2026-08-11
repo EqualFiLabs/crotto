@@ -43,9 +43,7 @@
     "treasuryShareBps": "1000"
   },
   "buyback": {
-    "slippageBps": "500",
     "callerTipBps": "10",
-    "twapWindowSeconds": "1800",
     "maximumWethChunk": "100000000000000000"
   }
 }

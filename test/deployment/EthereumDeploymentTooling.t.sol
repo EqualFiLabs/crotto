@@ -69,9 +69,7 @@ contract EthereumDeploymentToolingTest is Test {
         assertEq(configuration.round.vrfTimeoutBlocks, 30);
         assertEq(configuration.hook.inputFeeBps, 50);
         assertEq(configuration.hook.outputFeeBps, 50);
-        assertEq(configuration.buyback.slippageBps, 500);
         assertEq(configuration.buyback.callerTipBps, 10);
-        assertEq(configuration.buyback.twapWindowSeconds, 30 minutes);
         assertEq(configuration.buyback.maximumWethChunk, 0.1 ether);
     }
 

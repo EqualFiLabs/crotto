@@ -41,7 +41,7 @@ is introduced.
 contracts for only these supported updates:
 
 - round configuration;
-- automatic-buyback slippage;
+- automatic-buyback chunk and caller-tip settings;
 - external treasury receiver; and
 - canonical-hook fees and allocations.
 

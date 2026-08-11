@@ -499,32 +499,6 @@ contract CrottoSwapFeeHookTest is Test {
         _assertPendingSolvent(Currency.wrap(address(wethToken)));
     }
 
-    function test_TwapIgnoresTheCurrentSwapUntilTimeElapsesAtItsPrice() public {
-        _initialize(REQUIRED_WETH);
-        (, int24 initialTick,,) = manager.getSlot0(canonicalId);
-        vm.warp(block.timestamp + 30 minutes);
-
-        bool tokenIsCurrency0 = Currency.unwrap(canonicalKey.currency0) == address(token);
-        swapRouter.swap(
-            canonicalKey,
-            SwapParams({
-                zeroForOne: tokenIsCurrency0,
-                amountSpecified: -int256(10_000 ether),
-                sqrtPriceLimitX96: tokenIsCurrency0 ? TickMath.MIN_SQRT_PRICE + 1 : TickMath.MAX_SQRT_PRICE - 1
-            }),
-            IPoolSwapRouter.TestSettings({takeClaims: false, settleUsingBurn: false}),
-            ""
-        );
-
-        (, int24 manipulatedSpotTick,,) = manager.getSlot0(canonicalId);
-        assertNotEq(manipulatedSpotTick, initialTick, "swap moves spot");
-        (int24 meanTick, uint160 meanPrice) = hook.consult(30 minutes);
-        assertEq(meanTick, initialTick, "same-swap spot has zero TWAP weight");
-        assertEq(meanPrice, TickMath.getSqrtPriceAtTick(initialTick));
-        (, uint16 observationCount,,) = hook.oracleState();
-        assertEq(observationCount, 2);
-    }
-
     function test_TokenHeavyDonationKeepsUnmatchedValueForLaterCompounding() public {
         _initialize(REQUIRED_WETH);
         uint128 liquidityBefore = hook.lockedLiquidity();

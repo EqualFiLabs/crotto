@@ -24,8 +24,6 @@ interface ICrottoSwapFeeHook {
     event PermanentLiquidityAdded(PoolId indexed poolId, uint128 liquidityAdded, uint256 tokenUsed, uint256 wethUsed);
     event PermanentLiquidityFeesCollected(PoolId indexed poolId, uint256 tokenAmount, uint256 wethAmount);
     event POLDonated(address indexed donor, uint256 tokenAmount, uint256 wethAmount);
-    event OracleObservationRecorded(uint32 indexed timestamp, int24 tick, int256 tickCumulative);
-
     function setHookConfiguration(HookConfiguration calldata configuration) external;
 
     function initializeCanonicalPool(
@@ -64,13 +62,6 @@ interface ICrottoSwapFeeHook {
     function totalPendingPermanentLiquidity(Currency currency) external view returns (uint256);
 
     function lockedLiquidity() external view returns (uint128);
-
-    function consult(uint32 secondsAgo) external view returns (int24 arithmeticMeanTick, uint160 sqrtPriceX96);
-
-    function oracleState()
-        external
-        view
-        returns (uint16 observationIndex, uint16 observationCount, uint32 lastTimestamp, int24 lastTick);
 
     function poolInitialized() external view returns (bool);
 }

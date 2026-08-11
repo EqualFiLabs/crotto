@@ -89,7 +89,7 @@ contract CrottoDiamondInit {
         state.guardian = initialization.guardian;
         state.activationConfigurationVersion = 1;
         state.immutableConfigurationInitialized = true;
-        state.buybackConfiguration = initialization.buybackConfiguration;
+        LibGovernanceStorage.storeBuybackConfiguration(state, initialization.buybackConfiguration);
 
         LibLottery.initializeFirstRound(initialization.roundConfiguration);
 

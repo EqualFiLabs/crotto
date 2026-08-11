@@ -322,7 +322,8 @@ contract DiamondGovernanceTest is Test {
         assertEq(version, 1);
         assertEq(activation.costs[0], 100 ether);
         assertEq(stateProbe.hookConfiguration().inputFeeBps, 50);
-        assertEq(governance.buybackConfiguration().slippageBps, 500);
+        assertEq(governance.buybackConfiguration().callerTipBps, 10);
+        assertEq(governance.buybackConfiguration().maximumWethChunk, 0.1 ether);
         assertEq(hook.configuration().inputFeeBps, 50);
         assertEq(hook.lastCaller(), address(diamond));
         assertEq(governance.treasuryReceiver(), treasury);
@@ -609,9 +610,7 @@ contract DiamondGovernanceTest is Test {
         nextHook.inputFeeBps = 75;
         nextHook.outputFeeBps = 75;
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setHookConfiguration, (nextHook)));
-        BuybackConfiguration memory nextBuyback = BuybackConfiguration({
-            slippageBps: 750, callerTipBps: 10, twapWindowSeconds: 30 minutes, maximumWethChunk: 0.1 ether
-        });
+        BuybackConfiguration memory nextBuyback = BuybackConfiguration({callerTipBps: 25, maximumWethChunk: 0.2 ether});
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setBuybackConfiguration, (nextBuyback)));
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setTreasuryReceiver, (nextTreasury)));
         _executeThroughTimelock(address(diamond), abi.encodeCall(governance.setGuardian, (nextGuardian)));
@@ -631,7 +630,8 @@ contract DiamondGovernanceTest is Test {
         assertEq(activation.destinationWeights[0], 10);
         assertEq(stateProbe.storedWeight(11), 99);
         assertEq(stateProbe.hookConfiguration().inputFeeBps, 75);
-        assertEq(governance.buybackConfiguration().slippageBps, 750);
+        assertEq(governance.buybackConfiguration().callerTipBps, 25);
+        assertEq(governance.buybackConfiguration().maximumWethChunk, 0.2 ether);
         assertEq(hook.configuration().inputFeeBps, 75);
         assertEq(hook.lastCaller(), address(diamond));
         assertEq(governance.treasuryReceiver(), nextTreasury);
@@ -942,9 +942,7 @@ contract DiamondGovernanceTest is Test {
             hookConfiguration: _validHookConfiguration(),
             treasuryReceiver: treasury,
             guardian: guardian,
-            buybackConfiguration: BuybackConfiguration({
-                slippageBps: 500, callerTipBps: 10, twapWindowSeconds: 30 minutes, maximumWethChunk: 0.1 ether
-            })
+            buybackConfiguration: BuybackConfiguration({callerTipBps: 10, maximumWethChunk: 0.1 ether})
         });
     }
 

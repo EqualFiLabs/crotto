@@ -33,9 +33,7 @@ library LibCrottoValidation {
     error InvalidCanonicalTickSpacing(int24 tickSpacing);
     error InvalidPauseFlags(uint256 flags);
     error TreasuryReceiverIsProtocol(address receiver);
-    error InvalidBuybackSlippage(uint256 slippageBps);
     error InvalidBuybackCallerTip(uint256 callerTipBps);
-    error InvalidBuybackTwapWindow(uint256 twapWindowSeconds);
     error InvalidBuybackMaximumChunk(uint256 maximumWethChunk);
     error InvalidVrfTimeout(uint256 timeoutBlocks, uint256 minimum, uint256 maximum);
 
@@ -124,16 +122,9 @@ library LibCrottoValidation {
     }
 
     function validateBuybackConfiguration(BuybackConfiguration memory config) internal pure {
-        if (config.slippageBps == 0 || config.slippageBps >= CrottoConstants.BPS) {
-            revert InvalidBuybackSlippage(config.slippageBps);
-        }
         if (config.callerTipBps > CrottoConstants.MAX_BUYBACK_CALLER_TIP_BPS) {
             revert InvalidBuybackCallerTip(config.callerTipBps);
         }
-        if (
-            config.twapWindowSeconds < CrottoConstants.MIN_BUYBACK_TWAP_WINDOW_SECONDS
-                || config.twapWindowSeconds > CrottoConstants.MAX_BUYBACK_TWAP_WINDOW_SECONDS
-        ) revert InvalidBuybackTwapWindow(config.twapWindowSeconds);
         if (config.maximumWethChunk == 0 || config.maximumWethChunk > uint128(type(int128).max)) {
             revert InvalidBuybackMaximumChunk(config.maximumWethChunk);
         }

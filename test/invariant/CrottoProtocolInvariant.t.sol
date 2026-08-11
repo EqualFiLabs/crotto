@@ -628,13 +628,10 @@ contract CrottoProtocolHandler is Test {
         } catch {}
     }
 
-    function setBuybackSlippage(uint256 slippageSeed) external {
+    function setBuybackConfiguration(uint256 tipSeed, uint256 chunkSeed) external {
         governance.setBuybackConfiguration(
             BuybackConfiguration({
-                slippageBps: uint16(bound(slippageSeed, 1, 9_999)),
-                callerTipBps: 10,
-                twapWindowSeconds: 30 minutes,
-                maximumWethChunk: 0.1 ether
+                callerTipBps: uint16(bound(tipSeed, 0, 100)), maximumWethChunk: uint128(bound(chunkSeed, 1, 0.5 ether))
             })
         );
     }
@@ -841,7 +838,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
         selectors[15] = CrottoProtocolHandler.donatePOL.selector;
         selectors[16] = CrottoProtocolHandler.compoundPOL.selector;
         selectors[17] = CrottoProtocolHandler.swap.selector;
-        selectors[18] = CrottoProtocolHandler.setBuybackSlippage.selector;
+        selectors[18] = CrottoProtocolHandler.setBuybackConfiguration.selector;
         selectors[19] = CrottoProtocolHandler.setHookConfiguration.selector;
         selectors[20] = CrottoProtocolHandler.setRoundRewardRate.selector;
         selectors[21] = CrottoProtocolHandler.pauseActions.selector;

@@ -84,11 +84,9 @@ struct HookConfiguration {
     uint16 treasuryShareBps;
 }
 
-/// @notice Live governed execution parameters for permissionless pending buybacks.
+/// @notice Live governed chunk and caller-tip parameters for permissionless pending buybacks.
 struct BuybackConfiguration {
-    uint16 slippageBps;
     uint16 callerTipBps;
-    uint32 twapWindowSeconds;
     uint128 maximumWethChunk;
 }
 

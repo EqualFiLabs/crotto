@@ -34,7 +34,7 @@ library LibAutomaticBuyback {
     error InvalidCanonicalDirection();
     error InvalidTreasuryReceiver(address receiver, address expected);
     error UnexpectedWethDebt(uint256 expected, int256 actual);
-    error InsufficientNetTokenOutput(uint256 minimum, int256 actual);
+    error ZeroTokenOutput();
     error UnexpectedSettlement(uint256 expected, uint256 actual);
     error UnexpectedPoolManagerDebit(address asset, uint256 expected, uint256 actual);
     error UnexpectedTreasuryReceipt(uint256 expected, uint256 actual);
@@ -46,7 +46,6 @@ library LibAutomaticBuyback {
         uint256 specifiedWethIn;
         uint160 sqrtPriceLimitX96;
         uint256 expectedWethDebit;
-        uint256 minimumNetTokenOut;
         address treasuryReceiver;
     }
 
@@ -80,16 +79,8 @@ library LibAutomaticBuyback {
             revert InvalidCanonicalDirection();
         }
         IPoolManager manager = IPoolManager(immutableConfig.uniswapV4PoolManager);
-        (, uint160 sqrtPriceX96) = hook.consult(governance.buybackConfiguration.twapWindowSeconds);
         HookConfiguration memory hookConfiguration = hook.hookConfiguration();
-        quote = LibAutomaticBuybackMath.quote(
-            grossWethBudget,
-            hookConfiguration.inputFeeBps,
-            hookConfiguration.outputFeeBps,
-            governance.buybackConfiguration.slippageBps,
-            sqrtPriceX96,
-            wethIsCurrency0
-        );
+        quote = LibAutomaticBuybackMath.quote(grossWethBudget, hookConfiguration.inputFeeBps, wethIsCurrency0);
 
         UnlockPayload memory payload = UnlockPayload({
             key: key,
@@ -97,7 +88,6 @@ library LibAutomaticBuyback {
             specifiedWethIn: quote.specifiedWethIn,
             sqrtPriceLimitX96: quote.sqrtPriceLimitX96,
             expectedWethDebit: quote.totalWethDebit,
-            minimumNetTokenOut: quote.minimumNetTokenOut,
             treasuryReceiver: governance.treasuryReceiver
         });
         bytes memory encodedPayload = abi.encode(payload);
@@ -116,9 +106,6 @@ library LibAutomaticBuyback {
         if (actualWethDebit != quote.totalWethDebit) {
             revert UnexpectedWethDebt(quote.totalWethDebit, -int256(actualWethDebit));
         }
-        if (tokenOutput < quote.minimumNetTokenOut) {
-            revert InsufficientNetTokenOutput(quote.minimumNetTokenOut, int256(tokenOutput));
-        }
         actualNetTokenOut = tokenOutput;
 
         LibBuybackStorage.Layout storage totals = LibBuybackStorage.layout();
@@ -134,9 +121,6 @@ library LibAutomaticBuyback {
             quote.specifiedWethIn,
             quote.inputHookFee,
             actualWethDebit,
-            governance.buybackConfiguration.slippageBps,
-            governance.buybackConfiguration.twapWindowSeconds,
-            quote.minimumNetTokenOut,
             actualNetTokenOut
         );
     }
@@ -183,9 +167,7 @@ library LibAutomaticBuyback {
             revert UnexpectedWethDebt(payload.expectedWethDebit, wethDelta);
         }
         int256 tokenDelta = manager.currencyDelta(address(this), tokenCurrency);
-        if (tokenDelta < int256(payload.minimumNetTokenOut)) {
-            revert InsufficientNetTokenOutput(payload.minimumNetTokenOut, tokenDelta);
-        }
+        if (tokenDelta <= 0) revert ZeroTokenOutput();
         uint256 tokenOutput = uint256(tokenDelta);
 
         manager.sync(wethCurrency);

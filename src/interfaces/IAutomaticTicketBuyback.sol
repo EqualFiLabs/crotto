@@ -12,9 +12,6 @@ interface IAutomaticTicketBuyback {
         uint256 specifiedWethIn,
         uint256 inputHookFee,
         uint256 exactWethDebit,
-        uint16 slippageBps,
-        uint32 twapWindowSeconds,
-        uint256 minimumNetTokenOut,
         uint256 actualNetTokenOut
     );
 

@@ -22,7 +22,8 @@ contract BuybackSettlementFacet is CrottoFacet, IUnlockCallback, IAutomaticTicke
         LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
         uint256 pending = settlements.pendingBuybackWeth;
         if (pending == 0) revert EmptyPendingBuyback();
-        BuybackConfiguration memory configuration = LibGovernanceStorage.layout().buybackConfiguration;
+        LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
+        BuybackConfiguration memory configuration = LibGovernanceStorage.loadBuybackConfiguration(governance);
         consumedWeth = Math.min(pending, configuration.maximumWethChunk);
         uint256 callerTip = Math.mulDiv(consumedWeth, configuration.callerTipBps, CrottoConstants.BPS);
         if (callerTip >= consumedWeth) revert BuybackChunkConsumedByTip(consumedWeth, callerTip);

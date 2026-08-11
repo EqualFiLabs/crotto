@@ -542,9 +542,7 @@ contract LotteryTicketingTest is Test {
             }),
             treasuryReceiver: treasury,
             guardian: guardian,
-            buybackConfiguration: BuybackConfiguration({
-                slippageBps: 500, callerTipBps: 10, twapWindowSeconds: 30 minutes, maximumWethChunk: 0.1 ether
-            })
+            buybackConfiguration: BuybackConfiguration({callerTipBps: 10, maximumWethChunk: 0.1 ether})
         });
     }
 

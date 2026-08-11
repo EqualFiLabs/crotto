@@ -22,12 +22,8 @@ library CrottoConstants {
     uint16 internal constant INITIAL_HOOK_NFT_SHARE_BPS = 4_000;
     uint16 internal constant INITIAL_HOOK_TREASURY_SHARE_BPS = 1_000;
 
-    uint16 internal constant INITIAL_BUYBACK_SLIPPAGE_BPS = 500;
     uint16 internal constant INITIAL_BUYBACK_CALLER_TIP_BPS = 10;
     uint16 internal constant MAX_BUYBACK_CALLER_TIP_BPS = 100;
-    uint32 internal constant INITIAL_BUYBACK_TWAP_WINDOW_SECONDS = 30 minutes;
-    uint32 internal constant MIN_BUYBACK_TWAP_WINDOW_SECONDS = 5 minutes;
-    uint32 internal constant MAX_BUYBACK_TWAP_WINDOW_SECONDS = 60 minutes;
     uint128 internal constant INITIAL_BUYBACK_MAXIMUM_WETH_CHUNK = 0.1 ether;
     uint256 internal constant INITIAL_VRF_TIMEOUT_BLOCKS = 30;
     uint256 internal constant MAX_VRF_TIMEOUT_BLOCKS = 7_200;

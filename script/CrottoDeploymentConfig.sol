@@ -138,9 +138,7 @@ contract CrottoDeploymentConfig is Script {
         uint256 maximumWethChunk = vm.parseJsonUint(json, ".buyback.maximumWethChunk");
         if (maximumWethChunk > type(uint128).max) revert NarrowValueOverflow("maximumWethChunk", maximumWethChunk);
         configuration.buyback = BuybackConfiguration({
-            slippageBps: _uint16(json, ".buyback.slippageBps", "slippageBps"),
             callerTipBps: _uint16(json, ".buyback.callerTipBps", "callerTipBps"),
-            twapWindowSeconds: _uint32(json, ".buyback.twapWindowSeconds", "twapWindowSeconds"),
             maximumWethChunk: uint128(maximumWethChunk)
         });
     }
