@@ -70,15 +70,19 @@ directory granted read access by `foundry.toml`.
 
 ## Progressive immutability
 
-`CrottoFinalImmutability.s.sol` schedules and executes the irreversible removal
-of `diamondCut` and `transferOwnership`. Both phases require:
+`CrottoFinalImmutability.s.sol` schedules and executes the one-time atomic
+finalization call. It commits to the exact reviewed pre-final facet/address
+manifest, removes `diamondCut`, `transferOwnership`, and the finalization
+selector itself, then requires the exact compiled immutable selector set before
+the transaction may succeed. Both phases require:
 
 - `CONFIRM_FINAL_IMMUTABILITY=true`; and
 - `EXPECTED_PRE_FINAL_MANIFEST_HASH` equal to the live, reviewed selector
   manifest hash.
 
-Execution verifies that both mutation selectors are absent, Diamond ownership
-remains the timelock, essential governance and user selectors remain routed,
-and selector reinstallation fails. Do not schedule this operation until the
-release candidate and exact live manifest have completed the designated
+Any selector or facet-routing change after scheduling makes execution revert.
+Execution also verifies that all three removed selectors are absent, Diamond
+ownership remains the timelock, essential governance and user selectors remain
+routed, and selector reinstallation fails. Do not schedule this operation until
+the release candidate and exact live manifest have completed the designated
 security review.

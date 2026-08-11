@@ -87,6 +87,38 @@ library LibDiamond {
         if (facetAddress(selector) == address(0)) revert RequiredSelectorMissing(selector);
     }
 
+    function manifestHash() internal view returns (bytes32) {
+        DiamondStorage storage ds = diamondStorage();
+        uint256 length = ds.facetAddresses.length;
+        IDiamondLoupe.Facet[] memory facets_ = new IDiamondLoupe.Facet[](length);
+        for (uint256 i; i < length; ++i) {
+            address facet = ds.facetAddresses[i];
+            facets_[i] = IDiamondLoupe.Facet({
+                facetAddress: facet, functionSelectors: ds.facetFunctionSelectors[facet].functionSelectors
+            });
+        }
+        return keccak256(abi.encode(facets_));
+    }
+
+    function selectorSetHash() internal view returns (bytes32 hash, uint256 count) {
+        DiamondStorage storage ds = diamondStorage();
+        uint256 facetCount = ds.facetAddresses.length;
+        for (uint256 i; i < facetCount; ++i) {
+            count += ds.facetFunctionSelectors[ds.facetAddresses[i]].functionSelectors.length;
+        }
+
+        bytes4[] memory selectors = new bytes4[](count);
+        uint256 cursor;
+        for (uint256 i; i < facetCount; ++i) {
+            bytes4[] storage facetSelectors = ds.facetFunctionSelectors[ds.facetAddresses[i]].functionSelectors;
+            for (uint256 j; j < facetSelectors.length; ++j) {
+                selectors[cursor++] = facetSelectors[j];
+            }
+        }
+        _sortSelectors(selectors);
+        hash = keccak256(abi.encode(selectors));
+    }
+
     function markCoreInterfacesInitialized() internal {
         DiamondStorage storage ds = diamondStorage();
         if (ds.coreInterfacesInitialized) revert CoreInterfacesAlreadyInitialized();
@@ -259,5 +291,18 @@ library LibDiamond {
 
     function _selectorInstalled(DiamondStorage storage ds, bytes4 selector) private view returns (bool) {
         return ds.selectorToFacetAndPosition[selector].facetAddress != address(0);
+    }
+
+    function _sortSelectors(bytes4[] memory selectors) private pure {
+        uint256 length = selectors.length;
+        for (uint256 i = 1; i < length; ++i) {
+            bytes4 value = selectors[i];
+            uint256 j = i;
+            while (j != 0 && uint32(selectors[j - 1]) > uint32(value)) {
+                selectors[j] = selectors[j - 1];
+                --j;
+            }
+            selectors[j] = value;
+        }
     }
 }

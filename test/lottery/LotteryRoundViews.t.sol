@@ -11,8 +11,18 @@ import {CrottoDiamondInit} from "../../src/diamond/initializers/CrottoDiamondIni
 import {IDiamondCut} from "../../src/interfaces/diamond/IDiamondCut.sol";
 import {IDiamondLoupe} from "../../src/interfaces/diamond/IDiamondLoupe.sol";
 import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
+import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
-import {RequestRecord, Round, RoundConfiguration, RoundStatus, TicketBatch} from "../../src/types/CrottoTypes.sol";
+import {
+    ActivationConfiguration,
+    HookConfiguration,
+    ImmutableConfiguration,
+    RequestRecord,
+    Round,
+    RoundConfiguration,
+    RoundStatus,
+    TicketBatch
+} from "../../src/types/CrottoTypes.sol";
 
 contract LotteryRoundViewHarness is LotteryViewFacet {
     error AttemptOutOfBounds(uint256 attempt);
@@ -22,6 +32,25 @@ contract LotteryRoundViewHarness is LotteryViewFacet {
         state.currentRoundId = 1;
         state.rounds[1].status = RoundStatus.Open;
         state.rounds[1].config = configuration;
+        LibGovernanceStorage.layout().roundConfiguration = configuration;
+    }
+
+    function initializeConfigurationViews(
+        ImmutableConfiguration calldata immutableConfiguration_,
+        ActivationConfiguration calldata activationConfiguration_,
+        HookConfiguration calldata hookConfiguration_,
+        uint256 activationVersion
+    ) external {
+        if (activationVersion > type(uint64).max) {
+            revert AttemptOutOfBounds(activationVersion);
+        }
+        LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
+        governance.immutableConfiguration = immutableConfiguration_;
+        governance.activationConfiguration = activationConfiguration_;
+        governance.hookConfiguration = hookConfiguration_;
+        // The explicit bound above makes the harness-only narrowing exact.
+        // forge-lint: disable-next-line(unsafe-typecast)
+        governance.activationConfigurationVersion = uint64(activationVersion);
     }
 
     function seedTicketState(address player) external {
@@ -63,6 +92,9 @@ contract LotteryRoundViewsTest is Test {
         );
         views = LotteryRoundViewHarness(address(diamond));
         views.initializeRound(_configuration());
+        views.initializeConfigurationViews(
+            _immutableConfiguration(), _activationConfiguration(), _hookConfiguration(), 7
+        );
     }
 
     function test_ViewSelectorsRouteThroughDiamond() public view {
@@ -99,6 +131,32 @@ contract LotteryRoundViewsTest is Test {
         assertEq(views.rewardTickets(1, player), 0);
         assertFalse(views.playerRewardClaimed(1, player));
         assertEq(views.playerRewardEntitlement(1, player), 0);
+    }
+
+    function test_IntegrationConfigurationViewsReadCanonicalGovernanceStorage() public view {
+        ImmutableConfiguration memory immutableConfiguration_ = views.immutableConfiguration();
+        assertEq(immutableConfiguration_.activationToken, address(0xA11CE));
+        assertEq(immutableConfiguration_.rewardNFT, address(0xB0B));
+        assertEq(immutableConfiguration_.weth, address(0xC0FFEE));
+        assertEq(immutableConfiguration_.rewardNFTMaxSupply, 10_000);
+        assertEq(immutableConfiguration_.vaultPrice, 1_000 ether);
+
+        RoundConfiguration memory roundConfiguration_ = views.currentRoundConfiguration();
+        assertEq(roundConfiguration_.ticketPrice, 1 ether);
+        assertEq(roundConfiguration_.ticketTarget, 100);
+        assertEq(roundConfiguration_.buybackShareBps, 1_000);
+
+        (uint64 version, ActivationConfiguration memory activationConfiguration_) =
+            views.currentActivationConfiguration();
+        assertEq(version, 7);
+        assertEq(activationConfiguration_.costs[0], 100 ether);
+        assertEq(activationConfiguration_.destinationWeights[2], 4);
+        assertEq(activationConfiguration_.burnShareBps, 5_000);
+
+        HookConfiguration memory hookConfiguration_ = views.currentHookConfiguration();
+        assertEq(hookConfiguration_.inputFeeBps, 50);
+        assertEq(hookConfiguration_.outputFeeBps, 50);
+        assertEq(hookConfiguration_.polShareBps, 5_000);
     }
 
     function test_TicketPlayerAndRequestViewsReadIsolatedStorage() public {
@@ -161,6 +219,39 @@ contract LotteryRoundViewsTest is Test {
         });
     }
 
+    function _immutableConfiguration() private pure returns (ImmutableConfiguration memory configuration) {
+        configuration = ImmutableConfiguration({
+            activationToken: address(0xA11CE),
+            rewardNFT: address(0xB0B),
+            weth: address(0xC0FFEE),
+            vrfWrapper: address(0x1001),
+            uniswapV4PoolManager: address(0x1002),
+            canonicalHook: address(0x1003),
+            rewardNFTMaxSupply: 10_000,
+            vaultPrice: 1_000 ether,
+            requiredBootstrapWeth: 30 ether,
+            initialTokenPerWethWad: 100_000 ether,
+            maxCombinedHookFeeBps: 200,
+            canonicalTickSpacing: 60,
+            vrfCallbackGasLimit: 250_000,
+            vrfRequestConfirmations: 3
+        });
+    }
+
+    function _activationConfiguration() private pure returns (ActivationConfiguration memory configuration) {
+        configuration.costs = [uint256(100 ether), 200 ether, 400 ether];
+        configuration.destinationWeights = [uint256(1), 2, 4];
+        configuration.burnShareBps = 5_000;
+        configuration.nftShareBps = 4_000;
+        configuration.treasuryShareBps = 1_000;
+    }
+
+    function _hookConfiguration() private pure returns (HookConfiguration memory configuration) {
+        configuration = HookConfiguration({
+            inputFeeBps: 50, outputFeeBps: 50, polShareBps: 5_000, nftShareBps: 4_000, treasuryShareBps: 1_000
+        });
+    }
+
     function _facetCut(address facet, bytes4[] memory selectors) private pure returns (IDiamondCut.FacetCut memory) {
         return IDiamondCut.FacetCut({
             facetAddress: facet, action: IDiamondCut.FacetCutAction.Add, functionSelectors: selectors
@@ -189,26 +280,34 @@ contract LotteryRoundViewsTest is Test {
 
     function _viewHarnessSelectors() private pure returns (bytes4[] memory selectors) {
         bytes4[] memory viewSelectors = _lotteryViewSelectors();
-        selectors = new bytes4[](13);
+        selectors = new bytes4[](21);
         for (uint256 i; i < viewSelectors.length; ++i) {
             selectors[i] = viewSelectors[i];
         }
-        selectors[10] = LotteryRoundViewHarness.initializeRound.selector;
-        selectors[11] = LotteryRoundViewHarness.seedTicketState.selector;
-        selectors[12] = LotteryRoundViewHarness.seedRequest.selector;
+        selectors[17] = LotteryRoundViewHarness.initializeRound.selector;
+        selectors[18] = LotteryRoundViewHarness.initializeConfigurationViews.selector;
+        selectors[19] = LotteryRoundViewHarness.seedTicketState.selector;
+        selectors[20] = LotteryRoundViewHarness.seedRequest.selector;
     }
 
     function _lotteryViewSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](10);
-        selectors[0] = LotteryViewFacet.currentRoundId.selector;
-        selectors[1] = LotteryViewFacet.round.selector;
-        selectors[2] = LotteryViewFacet.remainingTickets.selector;
-        selectors[3] = LotteryViewFacet.ticketBatchCount.selector;
-        selectors[4] = LotteryViewFacet.ticketBatch.selector;
-        selectors[5] = LotteryViewFacet.playerTickets.selector;
-        selectors[6] = LotteryViewFacet.playerRewardClaimed.selector;
-        selectors[7] = LotteryViewFacet.rewardTickets.selector;
-        selectors[8] = LotteryViewFacet.playerRewardEntitlement.selector;
-        selectors[9] = LotteryViewFacet.requestRecord.selector;
+        selectors = new bytes4[](17);
+        selectors[0] = LotteryViewFacet.immutableConfiguration.selector;
+        selectors[1] = LotteryViewFacet.currentRoundConfiguration.selector;
+        selectors[2] = LotteryViewFacet.currentActivationConfiguration.selector;
+        selectors[3] = LotteryViewFacet.currentHookConfiguration.selector;
+        selectors[4] = LotteryViewFacet.currentRoundId.selector;
+        selectors[5] = LotteryViewFacet.round.selector;
+        selectors[6] = LotteryViewFacet.remainingTickets.selector;
+        selectors[7] = LotteryViewFacet.ticketBatchCount.selector;
+        selectors[8] = LotteryViewFacet.ticketBatch.selector;
+        selectors[9] = LotteryViewFacet.playerTickets.selector;
+        selectors[10] = LotteryViewFacet.playerRewardClaimed.selector;
+        selectors[11] = LotteryViewFacet.rewardTickets.selector;
+        selectors[12] = LotteryViewFacet.playerRewardEntitlement.selector;
+        selectors[13] = LotteryViewFacet.requestRecord.selector;
+        selectors[14] = LotteryViewFacet.roundSettlement.selector;
+        selectors[15] = LotteryViewFacet.expiredRoundRefund.selector;
+        selectors[16] = LotteryViewFacet.protocolAccounting.selector;
     }
 }

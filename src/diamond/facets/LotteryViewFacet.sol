@@ -4,15 +4,20 @@ pragma solidity 0.8.33;
 import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
 import {LibRewardAccounting} from "../../libraries/LibRewardAccounting.sol";
 import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStorage.sol";
+import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
 import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
 import {LibVaultStorage} from "../../libraries/storage/LibVaultStorage.sol";
 import {
+    ActivationConfiguration,
+    HookConfiguration,
+    ImmutableConfiguration,
     ProtocolAccountingView,
     RequestRecord,
     Round,
+    RoundConfiguration,
     RoundSettlement,
     RoundStatus,
     TicketBatch
@@ -22,6 +27,27 @@ import {
 contract LotteryViewFacet {
     error UnknownRound(uint256 roundId);
     error InvalidTicketBatchIndex(uint256 roundId, uint256 index, uint256 count);
+
+    function immutableConfiguration() external view returns (ImmutableConfiguration memory) {
+        return LibGovernanceStorage.layout().immutableConfiguration;
+    }
+
+    function currentRoundConfiguration() external view returns (RoundConfiguration memory) {
+        return LibGovernanceStorage.layout().roundConfiguration;
+    }
+
+    function currentActivationConfiguration()
+        external
+        view
+        returns (uint64 version, ActivationConfiguration memory configuration)
+    {
+        LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
+        return (governance.activationConfigurationVersion, governance.activationConfiguration);
+    }
+
+    function currentHookConfiguration() external view returns (HookConfiguration memory) {
+        return LibGovernanceStorage.layout().hookConfiguration;
+    }
 
     function currentRoundId() external view returns (uint256) {
         return LibLotteryStorage.layout().currentRoundId;
