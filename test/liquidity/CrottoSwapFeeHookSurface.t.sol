@@ -40,7 +40,7 @@ contract CrottoSwapFeeHookSurfaceTest is Test {
     }
 
     function _expectedSignatures() private pure returns (string[] memory expected) {
-        expected = new string[](30);
+        expected = new string[](33);
         expected[0] = "activationToken()";
         expected[1] =
             "afterAddLiquidity(address,(address,address,uint24,int24,address),(int24,int24,int256,bytes32),int256,int256,bytes)";
@@ -60,20 +60,23 @@ contract CrottoSwapFeeHookSurfaceTest is Test {
         expected[12] = "canonicalPoolKey()";
         expected[13] = "canonicalTickSpacing()";
         expected[14] = "compoundPOL()";
-        expected[15] = "crottoDiamond()";
-        expected[16] = "donatePOL(uint256,uint256)";
-        expected[17] = "getHookPermissions()";
-        expected[18] = "hookConfiguration()";
-        expected[19] = "initialTokenPerWethWad()";
-        expected[20] = "initializeCanonicalPool((address,address,uint24,int24,address),uint160,uint256,uint256)";
-        expected[21] = "lockedLiquidity()";
-        expected[22] = "maxCombinedHookFeeBps()";
-        expected[23] = "pendingPermanentLiquidity(address)";
-        expected[24] = "poolInitialized()";
-        expected[25] = "poolManager()";
-        expected[26] = "setHookConfiguration((uint16,uint16,uint16,uint16,uint16))";
-        expected[27] = "totalPendingPermanentLiquidity(address)";
-        expected[28] = "unlockCallback(bytes)";
-        expected[29] = "weth()";
+        expected[15] = "consult(uint32)";
+        expected[16] = "creditPOLWeth(uint256)";
+        expected[17] = "crottoDiamond()";
+        expected[18] = "donatePOL(uint256,uint256)";
+        expected[19] = "getHookPermissions()";
+        expected[20] = "hookConfiguration()";
+        expected[21] = "initialTokenPerWethWad()";
+        expected[22] = "initializeCanonicalPool((address,address,uint24,int24,address),uint160,uint256,uint256)";
+        expected[23] = "lockedLiquidity()";
+        expected[24] = "maxCombinedHookFeeBps()";
+        expected[25] = "oracleState()";
+        expected[26] = "pendingPermanentLiquidity(address)";
+        expected[27] = "poolInitialized()";
+        expected[28] = "poolManager()";
+        expected[29] = "setHookConfiguration((uint16,uint16,uint16,uint16,uint16))";
+        expected[30] = "totalPendingPermanentLiquidity(address)";
+        expected[31] = "unlockCallback(bytes)";
+        expected[32] = "weth()";
     }
 }

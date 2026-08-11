@@ -152,6 +152,7 @@ struct RoundSettlement {
 }
 
 /// @notice Lazy purchase-time Reward NFT eligibility carried across round resolution.
+// forge-lint: disable-next-line(pascal-case-struct)
 struct ProvisionalNFTRewardPosition {
     uint256 finalizedCheckpointRay;
     uint256 provisionalRoundId;

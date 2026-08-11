@@ -16,7 +16,6 @@ import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStora
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
-import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
 import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
 import {Round, RoundSettlement, RoundStatus, TicketBatch} from "../../types/CrottoTypes.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";

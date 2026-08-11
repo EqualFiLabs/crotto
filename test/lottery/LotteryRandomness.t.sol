@@ -18,14 +18,7 @@ import {ICrotto} from "../../src/interfaces/ICrotto.sol";
 import {LibCrottoGuard} from "../../src/libraries/LibCrottoGuard.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
-import {
-    IgnoredFulfillmentReason,
-    ImmutableConfiguration,
-    RequestRecord,
-    Round,
-    RoundConfiguration,
-    RoundStatus
-} from "../../src/types/CrottoTypes.sol";
+import {RequestRecord, Round, RoundConfiguration, RoundStatus} from "../../src/types/CrottoTypes.sol";
 
 contract NativeVrfWrapperMock {
     uint256 public price = 0.2 ether;

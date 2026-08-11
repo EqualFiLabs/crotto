@@ -50,8 +50,7 @@ import {
     HookConfiguration,
     ImmutableConfiguration,
     POLAccountingView,
-    RoundConfiguration,
-    RoundStatus
+    RoundConfiguration
 } from "../../src/types/CrottoTypes.sol";
 import {IPoolDonateRouter, IPoolSwapRouter} from "./CrottoSwapFeeHook.t.sol";
 
