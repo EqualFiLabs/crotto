@@ -213,6 +213,8 @@ contract SepoliaProtocolForkTest is Test {
         vm.expectRevert();
         lottery.requestRandomness(roundId);
 
+        Round memory requestedRound = views.round(roundId);
+        vm.roll(uint256(requestedRound.latestRequestBlock) + requestedRound.config.vrfTimeoutBlocks);
         uint256[] memory words = new uint256[](1);
         words[0] = randomWord;
         vm.prank(VRF_WRAPPER);
