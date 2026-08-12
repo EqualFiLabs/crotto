@@ -11,6 +11,14 @@ configuration file with production treasury, guardian, proposer, and economic
 values, including a round-snapshotted Operations Reserve Cap. Configuration
 files contain public inputs only.
 
+`config/sepolia-low-cost-rehearsal.json` is the accelerated Sepolia fixture. It
+uses placeholder authority addresses and must not be broadcast unchanged. Its
+small Ticket Price and Bootstrap POL threshold make complete public-testnet
+lifecycles practical, while its native Operations budget retains enough room
+for a 250,000-gas VRF request at up to roughly 5 gwei under the wrapper pricing
+observed when the fixture was created. Re-query the live wrapper and review all
+authority addresses immediately before every deployment.
+
 ## Deployment rehearsal
 
 Use Forge account or hardware-wallet options for signing. Never put a private

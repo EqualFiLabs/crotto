@@ -1,0 +1,49 @@
+{
+  "treasuryReceiver": "0x1111111111111111111111111111111111111111",
+  "guardian": "0x2222222222222222222222222222222222222222",
+  "proposers": ["0x3333333333333333333333333333333333333333"],
+  "enforceRuntimeCodeHashes": true,
+  "immutable": {
+    "rewardNFTMaxSupply": "10000",
+    "vaultPrice": "100000000000000000000",
+    "requiredBootstrapWeth": "1000000000000000",
+    "initialTokenPerWethWad": "10000000000000000000000",
+    "maxCombinedHookFeeBps": "200",
+    "canonicalTickSpacing": 60,
+    "vrfCallbackGasLimit": "250000",
+    "vrfRequestConfirmations": "3"
+  },
+  "round": {
+    "ticketPrice": "100000000000000",
+    "ticketOperationsFee": "120000000000000",
+    "operationsReserveCap": "5000000000000000",
+    "playerRewardRate": "10000000000000000000",
+    "ticketTarget": "25",
+    "maxVrfCost": "2500000000000000",
+    "vrfTimeoutBlocks": "30",
+    "requestCallerReward": "100000000000000",
+    "finalizationCallerReward": "100000000000000",
+    "winnerShareBps": "5000",
+    "nftShareBps": "3000",
+    "treasuryShareBps": "1000",
+    "buybackShareBps": "1000"
+  },
+  "activation": {
+    "costs": ["25000000000000000000", "50000000000000000000", "100000000000000000000"],
+    "destinationWeights": ["1", "2", "3"],
+    "burnShareBps": "2500",
+    "nftShareBps": "2500",
+    "treasuryShareBps": "5000"
+  },
+  "hook": {
+    "inputFeeBps": "50",
+    "outputFeeBps": "50",
+    "polShareBps": "5000",
+    "nftShareBps": "4000",
+    "treasuryShareBps": "1000"
+  },
+  "buyback": {
+    "callerTipBps": "10",
+    "maximumWethChunk": "100000000000000"
+  }
+}

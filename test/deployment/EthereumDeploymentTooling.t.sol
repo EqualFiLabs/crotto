@@ -73,6 +73,27 @@ contract EthereumDeploymentToolingTest is Test {
         assertEq(configuration.buyback.maximumWethChunk, 0.1 ether);
     }
 
+    function test_LoadsAndValidatesLowCostSepoliaRehearsalEconomics() public view {
+        CrottoDeploymentConfiguration memory configuration = configurationReader.loadConfiguration(
+            string.concat(vm.projectRoot(), "/script/config/sepolia-low-cost-rehearsal.json")
+        );
+        configurationReader.validateEconomics(configuration);
+
+        assertEq(configuration.round.ticketPrice, 0.0001 ether);
+        assertEq(configuration.round.ticketOperationsFee, 0.00012 ether);
+        assertEq(configuration.round.ticketTarget, 25);
+        assertEq(configuration.round.maxVrfCost, 0.0025 ether);
+        assertEq(configuration.round.operationsReserveCap, 0.005 ether);
+        assertEq(configuration.requiredBootstrapWeth, 0.001 ether);
+        assertEq(configuration.vaultPrice, 100 ether);
+        assertEq(configuration.buyback.maximumWethChunk, 0.0001 ether);
+
+        uint256 operationsAtSellout = configuration.round.ticketOperationsFee * configuration.round.ticketTarget;
+        uint256 requiredOperations = configuration.round.maxVrfCost + configuration.round.requestCallerReward
+            + configuration.round.finalizationCallerReward;
+        assertGe(operationsAtSellout, requiredOperations);
+    }
+
     function test_EthereumTargetsPinVerifiedDependencies() public view {
         EthereumTarget memory sepolia = configurationReader.ethereumTarget(11_155_111);
         assertEq(sepolia.weth, 0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14);
