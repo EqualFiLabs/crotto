@@ -11,6 +11,14 @@ configuration file with production treasury, guardian, proposer, and economic
 values, including a round-snapshotted Operations Reserve Cap. Configuration
 files contain public inputs only.
 
+`config/sepolia-low-cost-rehearsal.json` is the accelerated Sepolia fixture. It
+uses placeholder authority addresses and must not be broadcast unchanged. Its
+small Ticket Price and Bootstrap POL threshold make complete public-testnet
+lifecycles practical, while its native Operations budget retains enough room
+for a 250,000-gas VRF request at up to roughly 5 gwei under the wrapper pricing
+observed when the fixture was created. Re-query the live wrapper and review all
+authority addresses immediately before every deployment.
+
 ## Deployment rehearsal
 
 Use Forge account or hardware-wallet options for signing. Never put a private
@@ -34,6 +42,30 @@ for the universal CREATE2 deployer, then atomically installing and initializing
 the application facets. ActivationToken still mints exactly 10,000,000 CROTTO
 to the configured external treasury, and no post-launch general mint authority
 is introduced.
+
+## Sepolia fork proof
+
+The integration proof deploys the complete low-cost rehearsal graph into a
+Sepolia fork and exercises the deployed Sepolia WETH, Chainlink VRF Wrapper,
+Uniswap v4 PoolManager, Permit2, and Universal Router. It covers native ticket
+conversion, real VRF quotes and requests, POL initialization, all four canonical
+swap modes, successful and expired Builder rounds, deferred buyback execution,
+bilateral hook fees, automatic POL compounding, refunds, and final solvency.
+
+The Chainlink oracle callback is impersonated after a real wrapper request
+because an offchain fulfillment cannot arrive inside a deterministic fork test.
+The test skips when `ETH_SEPOLIA` is absent unless the proof is explicitly
+required:
+
+```bash
+source /path/to/private/rpc-environment
+CROTTO_REQUIRE_FORK_PROOF=true forge test \
+  --match-path test/integration/SepoliaProtocolFork.t.sol -vv
+```
+
+CI or release validation must set `CROTTO_REQUIRE_FORK_PROOF=true`; this converts
+a missing RPC from a reported skip into a hard failure. Pin a historical fork
+when reproducibility requires it with `CROTTO_SEPOLIA_FORK_BLOCK`.
 
 ## Typed timelock operations
 
