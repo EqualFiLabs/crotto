@@ -43,6 +43,30 @@ the application facets. ActivationToken still mints exactly 10,000,000 CROTTO
 to the configured external treasury, and no post-launch general mint authority
 is introduced.
 
+## Sepolia fork proof
+
+The integration proof deploys the complete low-cost rehearsal graph into a
+Sepolia fork and exercises the deployed Sepolia WETH, Chainlink VRF Wrapper,
+Uniswap v4 PoolManager, Permit2, and Universal Router. It covers native ticket
+conversion, real VRF quotes and requests, POL initialization, all four canonical
+swap modes, successful and expired Builder rounds, deferred buyback execution,
+bilateral hook fees, automatic POL compounding, refunds, and final solvency.
+
+The Chainlink oracle callback is impersonated after a real wrapper request
+because an offchain fulfillment cannot arrive inside a deterministic fork test.
+The test skips when `ETH_SEPOLIA` is absent unless the proof is explicitly
+required:
+
+```bash
+source /path/to/private/rpc-environment
+CROTTO_REQUIRE_FORK_PROOF=true forge test \
+  --match-path test/integration/SepoliaProtocolFork.t.sol -vv
+```
+
+CI or release validation must set `CROTTO_REQUIRE_FORK_PROOF=true`; this converts
+a missing RPC from a reported skip into a hard failure. Pin a historical fork
+when reproducibility requires it with `CROTTO_SEPOLIA_FORK_BLOCK`.
+
 ## Typed timelock operations
 
 `CrottoGovernanceOperations.s.sol` contains separate schedule and execute entry
