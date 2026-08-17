@@ -9,6 +9,7 @@ import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
 import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
+import {LibTicketQueueStorage} from "../../libraries/storage/LibTicketQueueStorage.sol";
 import {LibVaultStorage} from "../../libraries/storage/LibVaultStorage.sol";
 import {
     ActivationConfiguration,
@@ -20,7 +21,9 @@ import {
     RoundConfiguration,
     RoundSettlement,
     RoundStatus,
-    TicketBatch
+    TicketBatch,
+    TicketOrder,
+    TicketQueueView
 } from "../../types/CrottoTypes.sol";
 
 /// @notice Bounded round, ticket-batch, player, and randomness-attempt views.
@@ -62,6 +65,39 @@ contract LotteryViewFacet {
         _enforceRoundExists(roundId);
         Round storage storedRound = LibLotteryStorage.layout().rounds[roundId];
         return storedRound.config.ticketTarget - storedRound.ticketCount;
+    }
+
+    function ticketQueue() external view returns (TicketQueueView memory state) {
+        LibTicketQueueStorage.Layout storage queue = LibTicketQueueStorage.layout();
+        state.activeGeneration = queue.activeGeneration;
+        state.activeConfigurationHash = queue.activeConfigurationHash;
+        state.nextOrderId = queue.nextOrderId;
+        state.headOrderId = queue.headOrderId;
+        state.tailOrderId = queue.tailOrderId;
+        state.roundCursorOrderId = queue.roundCursorOrderId;
+        state.activeTicketEscrowWeth = queue.activeTicketEscrowWeth;
+        state.activeBuilderEscrowEth = queue.activeBuilderEscrowEth;
+        state.invalidatedTicketRefundWeth = queue.invalidatedTicketRefundWeth;
+        state.invalidatedBuilderRefundEth = queue.invalidatedBuilderRefundEth;
+    }
+
+    function ticketOrder(uint256 orderId) external view returns (TicketOrder memory) {
+        return LibTicketQueueStorage.layout().orders[orderId];
+    }
+
+    function ticketOrderRefund(uint256 orderId)
+        external
+        view
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth, bool claimed)
+    {
+        LibTicketQueueStorage.Layout storage queue = LibTicketQueueStorage.layout();
+        TicketOrder storage order = queue.orders[orderId];
+        claimed = order.refundClaimed;
+        if (order.owner == address(0) || claimed || !queue.generationInvalidated[order.generation]) {
+            return (0, 0, claimed);
+        }
+        ticketRefundWeth = order.remainingTickets * order.ticketPrice;
+        builderRefundEth = order.totalBuilderFee - order.allocatedBuilderFee;
     }
 
     function ticketBatchCount(uint256 roundId) external view returns (uint256) {
@@ -141,6 +177,11 @@ contract LotteryViewFacet {
         accounting.pendingBuybackWeth = settlements.pendingBuybackWeth;
         accounting.provisionalBuilderEth = LibBuilderFeesStorage.layout().provisionalNativeEthLiability;
         accounting.expiredBuilderRefundEth = settlements.expiredBuilderRefundEth;
+        LibTicketQueueStorage.Layout storage queue = LibTicketQueueStorage.layout();
+        accounting.queueTicketEscrowWeth = queue.activeTicketEscrowWeth;
+        accounting.queueTicketRefundWeth = queue.invalidatedTicketRefundWeth;
+        accounting.queueBuilderEscrowEth = queue.activeBuilderEscrowEth;
+        accounting.queueBuilderRefundEth = queue.invalidatedBuilderRefundEth;
     }
 
     function _enforceRoundExists(uint256 roundId) private view {

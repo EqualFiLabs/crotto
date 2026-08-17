@@ -6,17 +6,41 @@ import {CallerAction, IgnoredFulfillmentReason} from "../types/CrottoTypes.sol";
 /// @notice Permissionless lottery lifecycle and pull-claim surface of the Crotto Diamond.
 interface ICrotto {
     event RoundInitialized(uint256 indexed roundId);
-    event TicketsPurchased(
+    event TicketOrderSubmitted(
+        uint256 indexed orderId,
+        address indexed owner,
+        uint256 indexed generation,
+        bytes32 configurationHash,
+        uint256 totalTickets,
+        uint256 ticketsPerRound,
+        uint256 ticketEscrowWeth,
+        uint256 operationsFeeEth,
+        uint256 builderEscrowEth
+    );
+    event TicketOrderAllocated(
+        uint256 indexed orderId,
         uint256 indexed roundId,
-        address indexed buyer,
+        address indexed owner,
         uint256 quantity,
+        uint256 remainingTickets,
         uint256 startTicket,
         uint256 endTicketExclusive,
-        uint256 ticketPriceWeth,
-        uint256 operationsFeeEth,
-        uint256 operationsTreasuryWeth,
-        uint256 buybackWeth,
-        bool buybackRoutedToBootstrap
+        uint256 ticketValueWeth,
+        uint256 builderFeeEth
+    );
+    event TicketQueueGenerationInvalidated(
+        uint256 indexed generation,
+        bytes32 indexed configurationHash,
+        uint256 ticketRefundWeth,
+        uint256 builderRefundEth
+    );
+    event TicketOrderRefundClaimed(
+        uint256 indexed orderId,
+        address indexed owner,
+        address indexed wethReceiver,
+        address nativeReceiver,
+        uint256 ticketRefundWeth,
+        uint256 builderRefundEth
     );
     event RoundClosed(uint256 indexed roundId, uint256 ticketCount);
     event RandomnessRequested(
@@ -52,11 +76,19 @@ interface ICrotto {
     event CallerRewardClaimed(address indexed caller, address indexed receiver, uint256 amount);
     event OperationsReserveFunded(address indexed contributor, uint256 amount);
 
-    function buyTickets(uint256 quantity) external payable;
+    function buyTickets(uint256 totalTickets, uint256 ticketsPerRound) external payable returns (uint256 orderId);
 
-    function buyTicketsWithBuilder(uint256 quantity, address builder, uint16 builderFeeBps, bool redirectTicketRewards)
+    function buyTicketsWithBuilder(
+        uint256 totalTickets,
+        uint256 ticketsPerRound,
+        address builder,
+        uint16 builderFeeBps,
+        bool redirectTicketRewards
+    ) external payable returns (uint256 orderId);
+
+    function claimTicketOrderRefund(uint256 orderId, address wethReceiver, address nativeReceiver)
         external
-        payable;
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth);
 
     function fundOperationsReserve() external payable;
 

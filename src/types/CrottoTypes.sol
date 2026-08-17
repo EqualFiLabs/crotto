@@ -107,6 +107,40 @@ struct BuilderTicketQuote {
     bool rewardRedirectEffective;
 }
 
+/// @notice One fully funded FIFO ticket order and its per-round allocation state.
+struct TicketOrder {
+    address owner;
+    address builder;
+    address rewardBeneficiary;
+    uint16 builderFeeBps;
+    bool rewardRedirectEffective;
+    bool refundClaimed;
+    uint256 totalTickets;
+    uint256 remainingTickets;
+    uint256 ticketsPerRound;
+    uint256 generation;
+    bytes32 configurationHash;
+    uint256 ticketPrice;
+    uint256 totalBuilderFee;
+    uint256 allocatedBuilderFee;
+    uint256 previousOrderId;
+    uint256 nextOrderId;
+}
+
+/// @notice Aggregate FIFO queue state and isolated escrow/refund books.
+struct TicketQueueView {
+    uint256 activeGeneration;
+    bytes32 activeConfigurationHash;
+    uint256 nextOrderId;
+    uint256 headOrderId;
+    uint256 tailOrderId;
+    uint256 roundCursorOrderId;
+    uint256 activeTicketEscrowWeth;
+    uint256 activeBuilderEscrowEth;
+    uint256 invalidatedTicketRefundWeth;
+    uint256 invalidatedBuilderRefundEth;
+}
+
 /// @notice Complete one-time Diamond governance initialization payload.
 struct GovernanceInitialization {
     ImmutableConfiguration immutableConfiguration;
@@ -208,6 +242,10 @@ struct ProtocolAccountingView {
     uint256 pendingBuybackWeth;
     uint256 provisionalBuilderEth;
     uint256 expiredBuilderRefundEth;
+    uint256 queueTicketEscrowWeth;
+    uint256 queueTicketRefundWeth;
+    uint256 queueBuilderEscrowEth;
+    uint256 queueBuilderRefundEth;
 }
 
 /// @notice NFTVault supply, inventory, and TOKEN backing state.

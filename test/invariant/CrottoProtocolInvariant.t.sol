@@ -35,6 +35,7 @@ import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
 import {LibRoundSettlementStorage} from "../../src/libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
+import {LibTicketQueueStorage} from "../../src/libraries/storage/LibTicketQueueStorage.sol";
 import {LibVaultStorage} from "../../src/libraries/storage/LibVaultStorage.sol";
 import {ActivationToken} from "../../src/token/ActivationToken.sol";
 import {RewardNFT} from "../../src/token/RewardNFT.sol";
@@ -65,6 +66,10 @@ struct InvariantAccountingView {
     uint256 expiredTicketRefundWeth;
     uint256 pendingBuybackWeth;
     uint256 lotteryNftWeth;
+    uint256 queueTicketEscrowWeth;
+    uint256 queueTicketRefundWeth;
+    uint256 queueBuilderEscrowEth;
+    uint256 queueBuilderRefundEth;
 }
 
 interface IInvariantProbe {
@@ -99,7 +104,11 @@ contract InvariantProbeFacet {
             ticketEscrowWeth: settlements.activeTicketEscrowWeth,
             expiredTicketRefundWeth: settlements.expiredTicketRefundWeth,
             pendingBuybackWeth: settlements.pendingBuybackWeth,
-            lotteryNftWeth: settlements.lotteryNftWethLiability
+            lotteryNftWeth: settlements.lotteryNftWethLiability,
+            queueTicketEscrowWeth: LibTicketQueueStorage.layout().activeTicketEscrowWeth,
+            queueTicketRefundWeth: LibTicketQueueStorage.layout().invalidatedTicketRefundWeth,
+            queueBuilderEscrowEth: LibTicketQueueStorage.layout().activeBuilderEscrowEth,
+            queueBuilderRefundEth: LibTicketQueueStorage.layout().invalidatedBuilderRefundEth
         });
     }
 
@@ -241,9 +250,12 @@ contract CrottoProtocolHandler is Test {
         if (current.status != RoundStatus.Open) return;
         if (current.ticketCount >= current.config.ticketTarget) return;
         uint256 remaining = current.config.ticketTarget - current.ticketCount;
-        uint256 quantity = bound(quantitySeed, 1, remaining);
+        uint256 totalTickets = bound(quantitySeed, 1, current.config.ticketTarget * 3);
+        uint256 ticketsPerRound = bound(
+            uint256(keccak256(abi.encode(quantitySeed, actorSeed))), 1, _min(totalTickets, current.config.ticketTarget)
+        );
         address actor = _actor(actorSeed);
-        uint256 payment = (current.config.ticketPrice + current.config.ticketOperationsFee) * quantity;
+        uint256 payment = (current.config.ticketPrice + current.config.ticketOperationsFee) * totalTickets;
         if (actor.balance < payment) return;
 
         InvariantAccountingView memory accountingBefore = probe.protocolAccountingProbe();
@@ -251,21 +263,26 @@ contract CrottoProtocolHandler is Test {
         bytes32 beforeDigest = _purchaseDigest(roundId);
         vm.recordLogs();
         vm.prank(actor);
-        (bool success,) = diamond.call{value: payment}(abi.encodeCall(ICrotto.buyTickets, (quantity)));
+        (bool success,) =
+            diamond.call{value: payment}(abi.encodeCall(ICrotto.buyTickets, (totalTickets, ticketsPerRound)));
         Vm.Log[] memory logs = vm.getRecordedLogs();
         if (!success) {
             if (_purchaseDigest(roundId) != beforeDigest) purchaseRollbackViolation = true;
             return;
         }
 
-        uint256 ticketValue = current.config.ticketPrice * quantity;
-        uint256 operationsFee = current.config.ticketOperationsFee * quantity;
+        uint256 allocatedTickets = _min(ticketsPerRound, remaining);
+        uint256 ticketValue = current.config.ticketPrice * totalTickets;
+        uint256 allocatedTicketValue = current.config.ticketPrice * allocatedTickets;
+        uint256 queuedTicketValue = ticketValue - allocatedTicketValue;
+        uint256 operationsFee = current.config.ticketOperationsFee * totalTickets;
         uint256 reserveContribution =
             _reserveContribution(accountingBefore.operationsEth, current.config.operationsReserveCap, operationsFee);
         InvariantAccountingView memory accountingAfter = probe.protocolAccountingProbe();
         if (
             accountingAfter.operationsEth != accountingBefore.operationsEth + reserveContribution
-                || accountingAfter.ticketEscrowWeth != accountingBefore.ticketEscrowWeth + ticketValue
+                || accountingAfter.ticketEscrowWeth != accountingBefore.ticketEscrowWeth + allocatedTicketValue
+                || accountingAfter.queueTicketEscrowWeth != accountingBefore.queueTicketEscrowWeth + queuedTicketValue
                 || diamond.balance != nativeBefore + reserveContribution || _containsCanonicalSwap(logs)
         ) operationsRoutingViolation = true;
         _observeLiquidity();
@@ -310,7 +327,7 @@ contract CrottoProtocolHandler is Test {
         bytes32 beforeDigest = _purchaseDigest(roundId);
         vm.prank(buyer);
         (bool success,) = diamond.call{value: payment}(
-            abi.encodeCall(ICrotto.buyTicketsWithBuilder, (quantity, builder, feeBps, redirect))
+            abi.encodeCall(ICrotto.buyTicketsWithBuilder, (quantity, quantity, builder, feeBps, redirect))
         );
         if (!success) {
             if (_purchaseDigest(roundId) != beforeDigest) purchaseRollbackViolation = true;
@@ -862,6 +879,7 @@ contract CrottoProtocolInvariantTest is StdInvariant, AutomaticTicketBuybackFixt
             weth.balanceOf(address(diamond)),
             accounting.winnerWeth + accounting.rewardWeth + accounting.bootstrapWeth + accounting.ticketEscrowWeth
                 + accounting.expiredTicketRefundWeth + accounting.pendingBuybackWeth + accounting.lotteryNftWeth
+                + accounting.queueTicketEscrowWeth + accounting.queueTicketRefundWeth
         );
         assertGe(token.balanceOf(address(diamond)), accounting.rewardToken + accounting.vaultToken);
         assertGe(

@@ -10,6 +10,7 @@ import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibLottery} from "../../libraries/LibLottery.sol";
 import {LibOperationsAccounting} from "../../libraries/LibOperationsAccounting.sol";
 import {LibProvisionalRewardAccounting} from "../../libraries/LibProvisionalRewardAccounting.sol";
+import {LibTicketQueue} from "../../libraries/LibTicketQueue.sol";
 import {LibWethSolvency} from "../../libraries/LibWethSolvency.sol";
 import {ICrottoSwapFeeHook} from "../../interfaces/ICrottoSwapFeeHook.sol";
 import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStorage.sol";
@@ -65,6 +66,7 @@ contract LotteryFinalizationFacet is CrottoFacet {
 
         LibOperationsAccounting.creditFinalization(msg.sender, roundId, currentRound.config.finalizationCallerReward);
         LibLottery.initializeNextRound(roundId, LibGovernanceStorage.layout().roundConfiguration);
+        LibTicketQueue.processNewRound();
         LibOperationsAccounting.enforceNativeSolvency();
         LibWethSolvency.enforce();
 
@@ -97,6 +99,7 @@ contract LotteryFinalizationFacet is CrottoFacet {
 
         LibOperationsAccounting.creditExpiration(msg.sender, roundId, currentRound.config.finalizationCallerReward);
         LibLottery.initializeNextRound(roundId, LibGovernanceStorage.layout().roundConfiguration);
+        LibTicketQueue.processNewRound();
         LibOperationsAccounting.enforceNativeSolvency();
         LibWethSolvency.enforce();
         emit ICrotto.LotteryExpired(roundId, settlement.ticketEscrowWeth, settlement.builderFeeEth, msg.sender);

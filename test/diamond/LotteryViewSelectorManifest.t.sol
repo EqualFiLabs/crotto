@@ -13,7 +13,7 @@ contract LotteryViewSelectorManifestTest is Test {
         // Path is fixed by this test and access is read-only to generated Foundry output.
         // forge-lint: disable-next-line(unsafe-cheatcode)
         string[] memory signatures = vm.parseJsonKeys(vm.readFile(FACET_ARTIFACT), ".methodIdentifiers");
-        assertEq(signatures.length, 17);
+        assertEq(signatures.length, 20);
         _assertContains(signatures, LotteryViewFacet.immutableConfiguration.selector);
         _assertContains(signatures, LotteryViewFacet.currentRoundConfiguration.selector);
         _assertContains(signatures, LotteryViewFacet.currentActivationConfiguration.selector);
@@ -31,6 +31,9 @@ contract LotteryViewSelectorManifestTest is Test {
         _assertContains(signatures, LotteryViewFacet.roundSettlement.selector);
         _assertContains(signatures, LotteryViewFacet.expiredRoundRefund.selector);
         _assertContains(signatures, LotteryViewFacet.protocolAccounting.selector);
+        _assertContains(signatures, LotteryViewFacet.ticketQueue.selector);
+        _assertContains(signatures, LotteryViewFacet.ticketOrder.selector);
+        _assertContains(signatures, LotteryViewFacet.ticketOrderRefund.selector);
     }
 
     function _assertContains(string[] memory signatures, bytes4 expected) private pure {

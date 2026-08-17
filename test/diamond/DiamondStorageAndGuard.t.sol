@@ -20,6 +20,8 @@ import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceSto
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
 import {LibPOLStorage} from "../../src/libraries/storage/LibPOLStorage.sol";
 import {LibRewardsStorage} from "../../src/libraries/storage/LibRewardsStorage.sol";
+import {LibRoundSettlementStorage} from "../../src/libraries/storage/LibRoundSettlementStorage.sol";
+import {LibTicketQueueStorage} from "../../src/libraries/storage/LibTicketQueueStorage.sol";
 import {LibTreasuryStorage} from "../../src/libraries/storage/LibTreasuryStorage.sol";
 import {LibVaultStorage} from "../../src/libraries/storage/LibVaultStorage.sol";
 
@@ -95,7 +97,7 @@ contract StorageHarnessFacet {
         values[6] = LibBuybackStorage.layout().__reservedLegacyWethReserve;
     }
 
-    function storageSlots() external pure returns (bytes32[10] memory slots) {
+    function storageSlots() external pure returns (bytes32[12] memory slots) {
         slots[0] = LibDiamond.diamondStorageSlot();
         slots[1] = LibGovernanceStorage.storageSlot();
         slots[2] = LibLotteryStorage.storageSlot();
@@ -106,6 +108,8 @@ contract StorageHarnessFacet {
         slots[7] = LibCrottoGuard.storageSlot();
         slots[8] = LibBuybackStorage.storageSlot();
         slots[9] = LibBuilderFeesStorage.storageSlot();
+        slots[10] = LibRoundSettlementStorage.storageSlot();
+        slots[11] = LibTicketQueueStorage.storageSlot();
     }
 
     function seedLegacyTreasuryWords(uint256 legacyWeth, uint256 legacyToken, uint256 operationsReserve) external {
@@ -235,7 +239,7 @@ contract DiamondStorageAndGuardTest is Test {
     }
 
     function test_ProtocolStorageNamespacesAreUniqueAndAligned() public view {
-        bytes32[10] memory slots = StorageHarnessFacet(address(diamond)).storageSlots();
+        bytes32[12] memory slots = StorageHarnessFacet(address(diamond)).storageSlots();
         for (uint256 i; i < slots.length; ++i) {
             assertEq(uint256(slots[i]) & 0xff, 0, "ERC-7201 slot must be 256-byte aligned");
             for (uint256 j = i + 1; j < slots.length; ++j) {
@@ -252,6 +256,8 @@ contract DiamondStorageAndGuardTest is Test {
         assertEq(slots[7], _erc7201("crotto.storage.Guard"));
         assertEq(slots[8], _erc7201("crotto.storage.Buyback"));
         assertEq(slots[9], _erc7201("crotto.storage.BuilderFees"));
+        assertEq(slots[10], _erc7201("crotto.storage.RoundSettlement"));
+        assertEq(slots[11], _erc7201("crotto.storage.TicketQueue"));
     }
 
     function _erc7201(string memory namespace) private pure returns (bytes32) {

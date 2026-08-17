@@ -175,7 +175,7 @@ contract SepoliaProtocolForkTest is Test {
         uint256 payment = (TICKET_PRICE + OPERATIONS_FEE) * TICKET_TARGET;
 
         vm.prank(PLAYER);
-        lottery.buyTickets{value: payment}(TICKET_TARGET);
+        lottery.buyTickets{value: payment}(TICKET_TARGET, TICKET_TARGET);
 
         Round memory closed = views.round(1);
         RoundSettlement memory settlement = views.roundSettlement(1);
@@ -365,13 +365,15 @@ contract SepoliaProtocolForkTest is Test {
         vm.prank(PLAYER);
         builders.approveBuilder(BUILDER, BUILDER_FEE_BPS, true);
         BuilderTicketQuote memory quote =
-            views.builderTicketQuote(2, TICKET_TARGET, PLAYER, BUILDER, BUILDER_FEE_BPS, true);
+            views.builderTicketQuote(2, TICKET_TARGET, TICKET_TARGET, PLAYER, BUILDER, BUILDER_FEE_BPS, true);
         assertEq(quote.ticketValueEth, ROUND_TICKET_VALUE);
         assertEq(quote.builderFeeEth, 0.0000125 ether);
         assertEq(quote.rewardBeneficiary, BUILDER);
 
         vm.prank(PLAYER);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(TICKET_TARGET, BUILDER, BUILDER_FEE_BPS, true);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(
+            TICKET_TARGET, TICKET_TARGET, BUILDER, BUILDER_FEE_BPS, true
+        );
         ProtocolAccountingView memory openAccounting = views.protocolAccounting();
         assertEq(openAccounting.ticketEscrowWeth, ROUND_TICKET_VALUE);
         assertEq(openAccounting.provisionalBuilderEth, quote.builderFeeEth);
@@ -418,9 +420,11 @@ contract SepoliaProtocolForkTest is Test {
 
     function _proveExpiredBuilderRound() private {
         BuilderTicketQuote memory quote =
-            views.builderTicketQuote(3, TICKET_TARGET, PLAYER, BUILDER, BUILDER_FEE_BPS, true);
+            views.builderTicketQuote(3, TICKET_TARGET, TICKET_TARGET, PLAYER, BUILDER, BUILDER_FEE_BPS, true);
         vm.prank(PLAYER);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(TICKET_TARGET, BUILDER, BUILDER_FEE_BPS, true);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(
+            TICKET_TARGET, TICKET_TARGET, BUILDER, BUILDER_FEE_BPS, true
+        );
         uint256 requestId = lottery.requestRandomness(3);
         Round memory pendingRound = views.round(3);
         vm.roll(uint256(pendingRound.latestRequestBlock) + pendingRound.config.vrfTimeoutBlocks + 1);
