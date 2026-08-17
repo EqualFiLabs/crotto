@@ -5,225 +5,173 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 import {IWETH9} from "@uniswap/v4-periphery/src/interfaces/external/IWETH9.sol";
 import {ICrotto} from "../../interfaces/ICrotto.sol";
-import {ICrottoBuilderFees} from "../../interfaces/ICrottoBuilderFees.sol";
 import {CrottoConstants} from "../../libraries/CrottoConstants.sol";
 import {LibAssetTransfer} from "../../libraries/LibAssetTransfer.sol";
 import {LibCrottoValidation} from "../../libraries/LibCrottoValidation.sol";
 import {LibOperationsAccounting} from "../../libraries/LibOperationsAccounting.sol";
-import {LibProvisionalRewardAccounting} from "../../libraries/LibProvisionalRewardAccounting.sol";
+import {LibTicketQueue} from "../../libraries/LibTicketQueue.sol";
 import {LibWethSolvency} from "../../libraries/LibWethSolvency.sol";
 import {LibBuilderFeesStorage} from "../../libraries/storage/LibBuilderFeesStorage.sol";
 import {LibGovernanceStorage} from "../../libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../libraries/storage/LibLotteryStorage.sol";
-import {LibPOLStorage} from "../../libraries/storage/LibPOLStorage.sol";
-import {LibRewardsStorage} from "../../libraries/storage/LibRewardsStorage.sol";
-import {LibRoundSettlementStorage} from "../../libraries/storage/LibRoundSettlementStorage.sol";
 import {LibTreasuryStorage} from "../../libraries/storage/LibTreasuryStorage.sol";
-import {
-    BuilderApproval,
-    BuilderTicketQuote,
-    Round,
-    RoundConfiguration,
-    RoundSettlement,
-    RoundStatus,
-    TicketBatch
-} from "../../types/CrottoTypes.sol";
+import {BuilderApproval, BuilderTicketQuote, Round, RoundConfiguration, RoundStatus} from "../../types/CrottoTypes.sol";
 import {CrottoFacet} from "../CrottoFacet.sol";
 
-/// @notice Exact native-ETH ticket purchases with isolated Builder, WETH, and Operations accounting.
+/// @notice Fully funded FIFO ticket-order admission and invalidated-order refunds.
 contract LotteryTicketFacet is CrottoFacet {
     error UnknownRound(uint256 roundId);
-    error RoundNotOpen(uint256 roundId, RoundStatus status);
-    error InvalidTicketQuantity();
-    error TicketQuantityExceedsRemaining(uint256 requested, uint256 remaining);
+    error RoundUnavailable(uint256 roundId, RoundStatus status);
     error IncorrectTicketPayment(uint256 expected, uint256 actual);
     error UnexpectedWethDeposit(uint256 expected, uint256 actual);
     error InvalidBuilder(address builder);
     error BuilderFeeBpsExceeded(uint256 requested, uint256 maximum);
     error BuilderFeeNotApproved(address player, address builder, uint256 requested, uint256 approved);
+    error InvalidTicketOrderRefundReceiver(address receiver);
+    error NativeRefundTransferFailed(address receiver, uint256 amount);
+    error UnexpectedNativeRefundDebit(uint256 expected, uint256 actual);
 
-    struct PurchaseContext {
-        uint256 roundId;
-        uint256 startTicket;
-        uint256 endTicketExclusive;
-        uint256 ticketValue;
-        uint256 operationsContribution;
-        uint256 operationsTreasuryWeth;
-        uint256 builderFee;
-        address rewardBeneficiary;
-        bool rewardRedirectEffective;
-    }
-
-    function buyTickets(uint256 quantity)
+    function buyTickets(uint256 totalTickets, uint256 ticketsPerRound)
         external
         payable
         nonReentrant
         whenNotPaused(CrottoConstants.PAUSE_TICKET_PURCHASES)
+        returns (uint256 orderId)
     {
-        _buyTickets(quantity, address(0), 0, false);
+        return _submitOrder(totalTickets, ticketsPerRound, address(0), 0, false);
     }
 
-    function buyTicketsWithBuilder(uint256 quantity, address builder, uint16 builderFeeBps, bool redirectTicketRewards)
-        external
-        payable
-        nonReentrant
-        whenNotPaused(CrottoConstants.PAUSE_TICKET_PURCHASES)
-    {
-        _buyTickets(quantity, builder, builderFeeBps, redirectTicketRewards);
+    function buyTicketsWithBuilder(
+        uint256 totalTickets,
+        uint256 ticketsPerRound,
+        address builder,
+        uint16 builderFeeBps,
+        bool redirectTicketRewards
+    ) external payable nonReentrant whenNotPaused(CrottoConstants.PAUSE_TICKET_PURCHASES) returns (uint256 orderId) {
+        return _submitOrder(totalTickets, ticketsPerRound, builder, builderFeeBps, redirectTicketRewards);
     }
 
-    function ticketQuote(uint256 roundId, uint256 quantity)
+    function ticketQuote(uint256 roundId, uint256 totalTickets, uint256 ticketsPerRound)
         external
         view
         returns (uint256 ticketPriceEth, uint256 operationsFeeEth, uint256 totalEth)
     {
-        Round storage storedRound = _quotableRound(roundId, quantity);
-        return _quote(storedRound.config, quantity);
+        Round storage storedRound = _quotableRound(roundId, totalTickets, ticketsPerRound);
+        return _quote(storedRound.config, totalTickets);
     }
 
     function builderTicketQuote(
         uint256 roundId,
-        uint256 quantity,
+        uint256 totalTickets,
+        uint256 ticketsPerRound,
         address player,
         address builder,
         uint16 builderFeeBps,
         bool redirectTicketRewards
     ) external view returns (BuilderTicketQuote memory quote) {
-        Round storage storedRound = _quotableRound(roundId, quantity);
-        (quote.ticketValueEth, quote.operationsFeeEth, quote.totalEth) = _quote(storedRound.config, quantity);
+        Round storage storedRound = _quotableRound(roundId, totalTickets, ticketsPerRound);
+        (quote.ticketValueEth, quote.operationsFeeEth, quote.totalEth) = _quote(storedRound.config, totalTickets);
         (quote.rewardBeneficiary, quote.rewardRedirectEffective) =
             _validateBuilder(player, builder, builderFeeBps, redirectTicketRewards);
         quote.builderFeeEth = Math.mulDiv(quote.ticketValueEth, builderFeeBps, CrottoConstants.BPS);
         quote.totalEth += quote.builderFeeEth;
     }
 
-    function _buyTickets(uint256 quantity, address builder, uint16 builderFeeBps, bool redirectTicketRewards) private {
-        if (quantity == 0) revert InvalidTicketQuantity();
+    function claimTicketOrderRefund(uint256 orderId, address wethReceiver, address nativeReceiver)
+        external
+        nonReentrant
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth)
+    {
+        (ticketRefundWeth, builderRefundEth) = LibTicketQueue.consumeInvalidatedRefund(orderId, msg.sender);
+        if (ticketRefundWeth != 0) _validateReceiver(wethReceiver);
+        if (builderRefundEth != 0) _validateReceiver(nativeReceiver);
 
-        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
-        PurchaseContext memory purchase;
-        purchase.roundId = lottery.currentRoundId;
-        if (purchase.roundId == 0) revert UnknownRound(purchase.roundId);
-        Round storage currentRound = lottery.rounds[purchase.roundId];
-        if (currentRound.status != RoundStatus.Open) {
-            revert RoundNotOpen(purchase.roundId, currentRound.status);
+        if (ticketRefundWeth != 0) {
+            LibAssetTransfer.pushExact(
+                LibGovernanceStorage.layout().immutableConfiguration.weth, wethReceiver, ticketRefundWeth
+            );
+        }
+        if (builderRefundEth != 0) {
+            uint256 balanceBefore = address(this).balance;
+            if (!_sendNative(nativeReceiver, builderRefundEth)) {
+                revert NativeRefundTransferFailed(nativeReceiver, builderRefundEth);
+            }
+            uint256 balanceAfter = address(this).balance;
+            uint256 debit = balanceBefore >= balanceAfter ? balanceBefore - balanceAfter : 0;
+            if (debit != builderRefundEth) revert UnexpectedNativeRefundDebit(builderRefundEth, debit);
         }
 
-        purchase.startTicket = currentRound.ticketCount;
-        uint256 remaining = currentRound.config.ticketTarget - purchase.startTicket;
-        if (quantity > remaining) revert TicketQuantityExceedsRemaining(quantity, remaining);
+        LibOperationsAccounting.enforceNativeSolvency();
+        LibWethSolvency.enforce();
+        emit ICrotto.TicketOrderRefundClaimed(
+            orderId, msg.sender, wethReceiver, nativeReceiver, ticketRefundWeth, builderRefundEth
+        );
+    }
 
-        uint256 requiredPayment;
-        (purchase.ticketValue, purchase.operationsContribution, requiredPayment) = _quote(currentRound.config, quantity);
-        (purchase.rewardBeneficiary, purchase.rewardRedirectEffective) =
+    function _submitOrder(
+        uint256 totalTickets,
+        uint256 ticketsPerRound,
+        address builder,
+        uint16 builderFeeBps,
+        bool redirectTicketRewards
+    ) private returns (uint256 orderId) {
+        LibTicketQueue.validateQuantities(totalTickets, ticketsPerRound);
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        uint256 roundId = lottery.currentRoundId;
+        if (roundId == 0) revert UnknownRound(roundId);
+        Round storage currentRound = lottery.rounds[roundId];
+        if (currentRound.status == RoundStatus.Finalized || currentRound.status == RoundStatus.Expired) {
+            revert RoundUnavailable(roundId, currentRound.status);
+        }
+
+        (uint256 ticketValue, uint256 operationsFee, uint256 requiredPayment) =
+            _quote(currentRound.config, totalTickets);
+        (address rewardBeneficiary, bool rewardRedirectEffective) =
             _validateBuilder(msg.sender, builder, builderFeeBps, redirectTicketRewards);
-        purchase.builderFee = Math.mulDiv(purchase.ticketValue, builderFeeBps, CrottoConstants.BPS);
-        requiredPayment += purchase.builderFee;
+        uint256 builderFee = Math.mulDiv(ticketValue, builderFeeBps, CrottoConstants.BPS);
+        requiredPayment += builderFee;
         if (msg.value != requiredPayment) revert IncorrectTicketPayment(requiredPayment, msg.value);
 
-        purchase.endTicketExclusive = purchase.startTicket + quantity;
-        currentRound.ticketCount = purchase.endTicketExclusive;
-        lottery.ticketBatches[purchase.roundId].push(
-            TicketBatch({endExclusive: purchase.endTicketExclusive, buyer: msg.sender})
+        uint256 operationsTreasuryWeth = _creditOperations(currentRound.config.operationsReserveCap, operationsFee);
+        orderId = LibTicketQueue.submit(
+            LibTicketQueue.Submission({
+                owner: msg.sender,
+                builder: builder,
+                rewardBeneficiary: rewardBeneficiary,
+                builderFeeBps: builderFeeBps,
+                rewardRedirectEffective: rewardRedirectEffective,
+                totalTickets: totalTickets,
+                ticketsPerRound: ticketsPerRound,
+                ticketEscrowWeth: ticketValue,
+                operationsFeeEth: operationsFee,
+                totalBuilderFee: builderFee
+            })
         );
-        lottery.playerTicketCounts[purchase.roundId][msg.sender] += quantity;
-        lottery.rewardTicketCounts[purchase.roundId][purchase.rewardBeneficiary] += quantity;
-        _accrueBuilderFee(purchase, builder, builderFeeBps, quantity);
-
-        (uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized) =
-            _routeTicketValue(currentRound, purchase.ticketValue, purchase.operationsContribution);
-        purchase.operationsTreasuryWeth = operationsTreasuryWeth;
-
-        if (purchase.endTicketExclusive == currentRound.config.ticketTarget) {
-            currentRound.status = RoundStatus.Closed;
-            currentRound.closedAtBlock = uint64(block.number);
-        }
 
         address weth = LibGovernanceStorage.layout().immutableConfiguration.weth;
+        uint256 wethDeposit = ticketValue + operationsTreasuryWeth;
         uint256 wethBefore = IERC20(weth).balanceOf(address(this));
-        uint256 wethDeposit = purchase.ticketValue + purchase.operationsTreasuryWeth;
         IWETH9(weth).deposit{value: wethDeposit}();
         uint256 wethAfter = IERC20(weth).balanceOf(address(this));
         uint256 wethReceived = wethAfter >= wethBefore ? wethAfter - wethBefore : 0;
         if (wethReceived != wethDeposit) revert UnexpectedWethDeposit(wethDeposit, wethReceived);
+        LibAssetTransfer.pushExact(weth, LibGovernanceStorage.layout().treasuryReceiver, operationsTreasuryWeth);
 
-        LibAssetTransfer.pushExact(
-            weth, LibGovernanceStorage.layout().treasuryReceiver, purchase.operationsTreasuryWeth
-        );
-
+        LibTicketQueue.processCurrentRound();
         LibOperationsAccounting.enforceNativeSolvency();
         LibWethSolvency.enforce();
-        emit ICrotto.TicketsPurchased(
-            purchase.roundId,
-            msg.sender,
-            quantity,
-            purchase.startTicket,
-            purchase.endTicketExclusive,
-            purchase.ticketValue,
-            purchase.operationsContribution,
-            purchase.operationsTreasuryWeth,
-            buybackAmount,
-            !polInitialized
-        );
-        if (currentRound.status == RoundStatus.Closed) {
-            emit ICrotto.RoundClosed(purchase.roundId, purchase.endTicketExclusive);
-        }
     }
 
-    function _routeTicketValue(Round storage currentRound, uint256 ticketValue, uint256 operationsContribution)
+    function _creditOperations(uint256 operationsCap, uint256 operationsFee)
         private
-        returns (uint256 buybackAmount, uint256 operationsTreasuryWeth, bool polInitialized)
+        returns (uint256 operationsTreasuryWeth)
     {
-        uint256 winnerAmount = Math.mulDiv(ticketValue, currentRound.config.winnerShareBps, CrottoConstants.BPS);
-        uint256 nftAmount = Math.mulDiv(ticketValue, currentRound.config.nftShareBps, CrottoConstants.BPS);
-        buybackAmount = Math.mulDiv(ticketValue, currentRound.config.buybackShareBps, CrottoConstants.BPS);
-        uint256 treasuryAmount = ticketValue - winnerAmount - nftAmount - buybackAmount;
-        LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
-        RoundSettlement storage settlement = settlements.rounds[LibLotteryStorage.layout().currentRoundId];
-        settlement.ticketEscrowWeth += ticketValue;
-        settlement.winnerWeth += winnerAmount;
-        settlements.activeTicketEscrowWeth += ticketValue;
         LibTreasuryStorage.Layout storage treasury = LibTreasuryStorage.layout();
-        uint256 operationsReserve = treasury.operationsReserveEth;
-        uint256 operationsCap = currentRound.config.operationsReserveCap;
-        uint256 operationsHeadroom = operationsReserve < operationsCap ? operationsCap - operationsReserve : 0;
-        uint256 reserveContribution = Math.min(operationsContribution, operationsHeadroom);
-        operationsTreasuryWeth = operationsContribution - reserveContribution;
-        treasury.operationsReserveEth = operationsReserve + reserveContribution;
-        bool activeRewardNfts = LibRewardsStorage.layout().totalActiveWeight != 0;
-        polInitialized = LibPOLStorage.layout().initialized;
-        if (activeRewardNfts) {
-            LibProvisionalRewardAccounting.accrue(
-                LibLotteryStorage.layout().currentRoundId, nftAmount, LibRewardsStorage.layout().totalActiveWeight
-            );
-        } else if (!polInitialized) {
-            settlement.bootstrapPolWeth += nftAmount;
-        } else {
-            treasuryAmount += nftAmount;
-        }
-        if (!polInitialized) settlement.bootstrapPolWeth += buybackAmount;
-        else settlement.buybackWeth += buybackAmount;
-        settlement.treasuryWeth += treasuryAmount;
-    }
-
-    function _accrueBuilderFee(PurchaseContext memory purchase, address builder, uint16 builderFeeBps, uint256 quantity)
-        private
-    {
-        if (purchase.builderFee != 0) {
-            LibBuilderFeesStorage.Layout storage builders = LibBuilderFeesStorage.layout();
-            builders.totalNativeEthLiability += purchase.builderFee;
-            builders.provisionalNativeEthLiability += purchase.builderFee;
-            LibRoundSettlementStorage.Layout storage settlements = LibRoundSettlementStorage.layout();
-            settlements.provisionalBuilderCreditEth[purchase.roundId][builder] += purchase.builderFee;
-            settlements.builderRefundEth[purchase.roundId][msg.sender] += purchase.builderFee;
-            settlements.rounds[purchase.roundId].builderFeeEth += purchase.builderFee;
-            emit ICrottoBuilderFees.BuilderFeeAccrued(
-                msg.sender, builder, purchase.roundId, quantity, builderFeeBps, purchase.builderFee
-            );
-        }
-        if (purchase.rewardRedirectEffective) {
-            emit ICrottoBuilderFees.TicketRewardBeneficiarySelected(msg.sender, builder, purchase.roundId, quantity);
-        }
+        uint256 reserve = treasury.operationsReserveEth;
+        uint256 headroom = reserve < operationsCap ? operationsCap - reserve : 0;
+        uint256 reserveContribution = Math.min(operationsFee, headroom);
+        treasury.operationsReserveEth = reserve + reserveContribution;
+        operationsTreasuryWeth = operationsFee - reserveContribution;
     }
 
     function _validateBuilder(address player, address builder, uint16 builderFeeBps, bool redirectTicketRewards)
@@ -252,22 +200,40 @@ contract LotteryTicketFacet is CrottoFacet {
         rewardBeneficiary = rewardRedirectEffective ? builder : player;
     }
 
-    function _quotableRound(uint256 roundId, uint256 quantity) private view returns (Round storage storedRound) {
-        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
-        if (roundId == 0 || roundId > lottery.currentRoundId) revert UnknownRound(roundId);
-        if (quantity == 0) revert InvalidTicketQuantity();
-        storedRound = lottery.rounds[roundId];
-        uint256 remaining = storedRound.config.ticketTarget - storedRound.ticketCount;
-        if (quantity > remaining) revert TicketQuantityExceedsRemaining(quantity, remaining);
-    }
-
-    function _quote(RoundConfiguration storage configuration, uint256 quantity)
+    function _quotableRound(uint256 roundId, uint256 totalTickets, uint256 ticketsPerRound)
         private
         view
-        returns (uint256 ticketValue, uint256 operationsContribution, uint256 requiredPayment)
+        returns (Round storage storedRound)
     {
-        ticketValue = configuration.ticketPrice * quantity;
-        operationsContribution = configuration.ticketOperationsFee * quantity;
-        requiredPayment = ticketValue + operationsContribution;
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        if (roundId == 0 || roundId != lottery.currentRoundId) revert UnknownRound(roundId);
+        LibTicketQueue.validateQuantities(totalTickets, ticketsPerRound);
+        storedRound = lottery.rounds[roundId];
+        if (storedRound.status == RoundStatus.Finalized || storedRound.status == RoundStatus.Expired) {
+            revert RoundUnavailable(roundId, storedRound.status);
+        }
+    }
+
+    function _quote(RoundConfiguration storage configuration, uint256 totalTickets)
+        private
+        view
+        returns (uint256 ticketValue, uint256 operationsFee, uint256 requiredPayment)
+    {
+        ticketValue = configuration.ticketPrice * totalTickets;
+        operationsFee = configuration.ticketOperationsFee * totalTickets;
+        requiredPayment = ticketValue + operationsFee;
+    }
+
+    function _validateReceiver(address receiver) private view {
+        LibGovernanceStorage.Layout storage governance = LibGovernanceStorage.layout();
+        if (
+            receiver == address(0) || LibCrottoValidation.isProtocolAddress(receiver, governance.immutableConfiguration)
+        ) revert InvalidTicketOrderRefundReceiver(receiver);
+    }
+
+    function _sendNative(address receiver, uint256 amount) private returns (bool success) {
+        assembly ("memory-safe") {
+            success := call(gas(), receiver, amount, 0, 0, 0, 0)
+        }
     }
 }

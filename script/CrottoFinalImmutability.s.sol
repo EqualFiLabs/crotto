@@ -73,6 +73,7 @@ abstract contract CrottoFinalImmutability is CrottoScriptBase {
         }
         _requireSelector(loupe, ICrotto.buyTickets.selector);
         _requireSelector(loupe, ICrotto.buyTicketsWithBuilder.selector);
+        _requireSelector(loupe, ICrotto.claimTicketOrderRefund.selector);
         _requireSelector(loupe, ICrottoBuilderFees.claimBuilderFees.selector);
         _requireSelector(loupe, ICrotto.finalizeLottery.selector);
         _requireSelector(loupe, ICrottoGovernance.setRoundConfiguration.selector);

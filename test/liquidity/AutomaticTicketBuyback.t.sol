@@ -252,7 +252,7 @@ abstract contract AutomaticTicketBuybackFixture is Test {
 
     function _buyTickets(uint256 quantity) internal {
         vm.prank(player);
-        lottery.buyTickets{value: (TICKET_PRICE + OPERATIONS_FEE) * quantity}(quantity);
+        lottery.buyTickets{value: (TICKET_PRICE + OPERATIONS_FEE) * quantity}(quantity, quantity);
     }
 
     function _assertOneCanonicalSwap(Vm.Log[] memory logs) internal view {

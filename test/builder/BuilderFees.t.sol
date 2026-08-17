@@ -82,7 +82,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         builders.approveBuilder(builder, 50, false);
         BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, builder, 50, false);
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, 1, player, builder, 50, false);
         assertEq(quote.ticketValueEth, TICKET_PRICE);
         assertEq(quote.operationsFeeEth, OPERATIONS_FEE);
         assertEq(quote.builderFeeEth, 0.005 ether);
@@ -91,7 +91,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         assertFalse(quote.rewardRedirectEffective);
 
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, builder, 50, false);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, 1, builder, 50, false);
 
         RoundSettlement memory afterSettlement = views.roundSettlement(1);
         assertEq(afterSettlement.winnerWeth - beforeSettlement.winnerWeth, 0.5 ether);
@@ -114,12 +114,12 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         builders.approveBuilder(builder, 50, false);
         BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, builder, 50, false);
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, 1, player, builder, 50, false);
         uint256 treasuryWethBefore = weth.balanceOf(treasury);
         uint256 diamondWethBefore = weth.balanceOf(address(diamond));
 
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, builder, 50, false);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, 1, builder, 50, false);
 
         assertEq(weth.balanceOf(treasury) - treasuryWethBefore, 0.01 ether);
         assertEq(weth.balanceOf(address(diamond)) - diamondWethBefore, 1 ether);
@@ -132,12 +132,12 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         builders.approveBuilder(builder, 25, false);
         BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 2, player, builder, 20, true);
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 2, 2, player, builder, 20, true);
         assertEq(quote.rewardBeneficiary, player);
         assertFalse(quote.rewardRedirectEffective);
 
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(2, builder, 20, true);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(2, 2, builder, 20, true);
         assertEq(views.playerTickets(1, player), 2);
         assertEq(views.rewardTickets(1, player), 2);
         assertEq(views.rewardTickets(1, builder), 0);
@@ -147,14 +147,14 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
     function test_RevocationDoesNotChangeHistoricalRewardAssignment() public {
         vm.startPrank(player);
         builders.approveBuilder(builder, 0, true);
-        lottery.buyTicketsWithBuilder{value: (TICKET_PRICE + OPERATIONS_FEE) * 2}(2, builder, 0, true);
+        lottery.buyTicketsWithBuilder{value: (TICKET_PRICE + OPERATIONS_FEE) * 2}(2, 2, builder, 0, true);
         builders.revokeBuilder(builder);
         vm.stopPrank();
 
         assertEq(views.rewardTickets(1, builder), 2);
         assertEq(views.rewardTickets(1, player), 0);
         BuilderTicketQuote memory nextQuote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, builder, 0, true);
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, 1, player, builder, 0, true);
         assertEq(nextQuote.rewardBeneficiary, player);
         assertFalse(nextQuote.rewardRedirectEffective);
     }
@@ -163,14 +163,14 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         builders.approveBuilder(builder, 0, true);
         BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 3, player, builder, 0, true);
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 3, 3, player, builder, 0, true);
         assertEq(quote.builderFeeEth, 0);
         assertEq(quote.totalEth, (TICKET_PRICE + OPERATIONS_FEE) * 3);
         assertEq(quote.rewardBeneficiary, builder);
         assertTrue(quote.rewardRedirectEffective);
 
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(3, builder, 0, true);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(3, 3, builder, 0, true);
         assertEq(views.playerTickets(1, player), 3);
         assertEq(views.rewardTickets(1, player), 0);
         assertEq(views.rewardTickets(1, builder), 3);
@@ -179,18 +179,18 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
 
     function test_ZeroBuilderPreservesCanonicalPurchaseAndRejectsNonzeroFee() public {
         BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, address(0), 0, true);
+            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, 1, player, address(0), 0, true);
         assertEq(quote.builderFeeEth, 0);
         assertEq(quote.rewardBeneficiary, player);
         assertFalse(quote.rewardRedirectEffective);
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, address(0), 0, true);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(1, 1, address(0), 0, true);
         assertEq(views.playerTickets(1, player), 1);
         assertEq(views.rewardTickets(1, player), 1);
 
         vm.prank(player);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.InvalidBuilder.selector, address(0)));
-        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, address(0), 1, false);
+        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1, address(0), 1, false);
     }
 
     function test_RevertWhen_FeeExceedsApprovalOrProtocolCeiling() public {
@@ -201,14 +201,14 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.expectRevert(
             abi.encodeWithSelector(LotteryTicketFacet.BuilderFeeNotApproved.selector, player, builder, 21, 20)
         );
-        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, builder, 21, false);
+        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1, builder, 21, false);
 
         vm.prank(player);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.BuilderFeeBpsExceeded.selector, 51, 50));
-        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, builder, 51, false);
+        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1, builder, 51, false);
 
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.BuilderFeeBpsExceeded.selector, type(uint16).max, 50));
-        LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, player, builder, type(uint16).max, false);
+        LotteryTicketFacet(address(diamond)).builderTicketQuote(1, 1, 1, player, builder, type(uint16).max, false);
         assertEq(views.round(1).ticketCount, 0);
         assertEq(builders.builderCredit(builder), 0);
     }
@@ -220,7 +220,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.expectRevert(
             abi.encodeWithSelector(LotteryTicketFacet.BuilderFeeNotApproved.selector, player, builder, 1, 0)
         );
-        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, builder, 1, true);
+        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1, builder, 1, true);
         vm.stopPrank();
     }
 
@@ -233,13 +233,13 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.expectRevert(
             abi.encodeWithSelector(LotteryTicketFacet.IncorrectTicketPayment.selector, expected, expected - 1)
         );
-        lottery.buyTicketsWithBuilder{value: expected - 1}(1, builder, 50, false);
+        lottery.buyTicketsWithBuilder{value: expected - 1}(1, 1, builder, 50, false);
 
         vm.prank(player);
         vm.expectRevert(
             abi.encodeWithSelector(LotteryTicketFacet.IncorrectTicketPayment.selector, expected, expected + 1)
         );
-        lottery.buyTicketsWithBuilder{value: expected + 1}(1, builder, 50, false);
+        lottery.buyTicketsWithBuilder{value: expected + 1}(1, 1, builder, 50, false);
 
         assertEq(views.round(1).ticketCount, 0);
         assertEq(builders.builderCredit(builder), 0);
@@ -252,7 +252,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         uint256 balanceBefore = player.balance;
         uint256 total = TICKET_PRICE + OPERATIONS_FEE + 0.005 ether;
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: total}(1, player, 50, true);
+        lottery.buyTicketsWithBuilder{value: total}(1, 1, player, 50, true);
 
         assertEq(balanceBefore - player.balance, total);
         assertEq(builders.provisionalBuilderCredit(1, player), 0.005 ether);
@@ -316,7 +316,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
 
         vm.prank(player);
         vm.expectRevert();
-        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, builder, 0, true);
+        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1, builder, 0, true);
     }
 
     function test_RevertWhen_ProtocolAddressWouldReceiveFeeOrEffectiveRedirect() public {
@@ -338,7 +338,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         uint256 total = TICKET_PRICE * 25 + OPERATIONS_FEE * 25 + 0.125 ether;
 
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: total}(25, builder, 50, false);
+        lottery.buyTicketsWithBuilder{value: total}(25, 25, builder, 50, false);
 
         assertEq(views.round(roundId).ticketCount, ticketCountBefore + 25);
         assertEq(builders.builderCredit(builder), 0);
@@ -354,7 +354,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
 
         vm.prank(player);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.UnexpectedWethDeposit.selector, TICKET_PRICE, 0));
-        lottery.buyTicketsWithBuilder{value: total}(1, builder, 50, true);
+        lottery.buyTicketsWithBuilder{value: total}(1, 1, builder, 50, true);
 
         assertEq(views.round(1).ticketCount, 0);
         assertEq(views.rewardTickets(1, builder), 0);
@@ -370,7 +370,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         uint256 total = TICKET_PRICE + OPERATIONS_FEE + 0.005 ether;
 
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: total}(1, address(rejectingBuilder), 50, true);
+        lottery.buyTicketsWithBuilder{value: total}(1, 1, address(rejectingBuilder), 50, true);
 
         assertEq(builders.provisionalBuilderCredit(1, address(rejectingBuilder)), 0.005 ether);
         assertEq(views.rewardTickets(1, address(rejectingBuilder)), 1);
@@ -380,7 +380,7 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         vm.prank(player);
         builders.approveBuilder(builder, 0, true);
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, builder, 0, true);
+        lottery.buyTicketsWithBuilder{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1, builder, 0, true);
         _buyTickets(TICKET_TARGET - 1);
 
         vm.prank(receiver);
@@ -404,14 +404,14 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
         uint16 boundedFeeBps = SafeCast.toUint16(feeBps);
         vm.prank(player);
         builders.approveBuilder(builder, boundedFeeBps, true);
-        BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, quantity, player, builder, boundedFeeBps, false);
+        BuilderTicketQuote memory quote = LotteryTicketFacet(address(diamond))
+            .builderTicketQuote(1, quantity, quantity, player, builder, boundedFeeBps, false);
         uint256 expectedFee = Math.mulDiv(TICKET_PRICE * quantity, feeBps, CrottoConstants.BPS);
         assertEq(quote.builderFeeEth, expectedFee);
 
         uint256 playerBefore = player.balance;
         vm.prank(player);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(quantity, builder, boundedFeeBps, false);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(quantity, quantity, builder, boundedFeeBps, false);
         assertEq(playerBefore - player.balance, quote.totalEth);
         assertEq(builders.provisionalBuilderCredit(1, builder), expectedFee);
         assertEq(views.rewardTickets(1, player), quantity);
@@ -420,10 +420,10 @@ contract BuilderFeesTest is AutomaticTicketBuybackFixture {
     function _approveAndBuy(address buyer, address targetBuilder, uint16 bps, uint256 quantity, bool redirect) private {
         vm.prank(buyer);
         builders.approveBuilder(targetBuilder, bps, redirect);
-        BuilderTicketQuote memory quote =
-            LotteryTicketFacet(address(diamond)).builderTicketQuote(1, quantity, buyer, targetBuilder, bps, redirect);
+        BuilderTicketQuote memory quote = LotteryTicketFacet(address(diamond))
+            .builderTicketQuote(1, quantity, quantity, buyer, targetBuilder, bps, redirect);
         vm.prank(buyer);
-        lottery.buyTicketsWithBuilder{value: quote.totalEth}(quantity, targetBuilder, bps, redirect);
+        lottery.buyTicketsWithBuilder{value: quote.totalEth}(quantity, quantity, targetBuilder, bps, redirect);
     }
 
     function _finalizeCurrentRound() private {

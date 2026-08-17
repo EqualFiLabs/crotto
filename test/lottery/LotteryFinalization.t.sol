@@ -21,7 +21,7 @@ import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {LibLottery} from "../../src/libraries/LibLottery.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
-import {ImmutableConfiguration, Round, RoundConfiguration, RoundStatus} from "../../src/types/CrottoTypes.sol";
+import {Round, RoundConfiguration, RoundStatus, TicketOrder, TicketQueueView} from "../../src/types/CrottoTypes.sol";
 import {NativeVrfWrapperMock} from "./LotteryRandomness.t.sol";
 
 contract PlayerRewardTokenMock is ERC20 {
@@ -81,6 +81,12 @@ contract LotteryFinalizationStateHarness {
 
     function setNextRoundConfiguration(RoundConfiguration calldata configuration) external {
         LibGovernanceStorage.layout().roundConfiguration = configuration;
+    }
+
+    function setOperationsCap(uint192 cap) external {
+        LibGovernanceStorage.layout().roundConfiguration.operationsReserveCap = cap;
+        LibLotteryStorage.Layout storage lottery = LibLotteryStorage.layout();
+        lottery.rounds[lottery.currentRoundId].config.operationsReserveCap = cap;
     }
 
     function setToken(address token) external {
@@ -212,6 +218,95 @@ contract LotteryFinalizationTest is Test {
         assertEq(views.round(2).ticketCount, 0);
     }
 
+    function test_FifoOrdersRetainPositionAndPerRoundLimitAcrossRollover() public {
+        stateHarness.setOperationsCap(10 ether);
+        vm.prank(playerA);
+        uint256 orderA = ticketing.buyTickets{value: 8 * (TICKET_PRICE + OPERATIONS_FEE)}(8, 2);
+        vm.prank(playerB);
+        uint256 orderB = ticketing.buyTickets{value: 6 * (TICKET_PRICE + OPERATIONS_FEE)}(6, 3);
+
+        assertEq(views.playerTickets(1, playerA), 2);
+        assertEq(views.playerTickets(1, playerB), 3);
+        assertEq(views.ticketOrder(orderA).remainingTickets, 6);
+        assertEq(views.ticketOrder(orderB).remainingTickets, 3);
+
+        _acceptRandomness(1);
+        finalization.finalizeLottery(1);
+
+        assertEq(uint8(views.round(2).status), uint8(RoundStatus.Closed));
+        assertEq(views.playerTickets(2, playerA), 2);
+        assertEq(views.playerTickets(2, playerB), 3);
+        TicketOrder memory storedA = views.ticketOrder(orderA);
+        TicketOrder memory storedB = views.ticketOrder(orderB);
+        assertEq(storedA.remainingTickets, 4);
+        assertEq(storedB.remainingTickets, 0);
+        TicketQueueView memory queue = views.ticketQueue();
+        assertEq(queue.headOrderId, orderA);
+        assertEq(queue.tailOrderId, orderA);
+        assertEq(queue.roundCursorOrderId, 0);
+
+        _acceptRandomnessFor(2, 2);
+        finalization.finalizeLottery(2);
+        assertEq(views.playerTickets(3, playerA), 2);
+        assertEq(views.ticketOrder(orderA).remainingTickets, 2);
+    }
+
+    function test_ConfigurationChangeInvalidatesOnlyUnallocatedEscrow() public {
+        address builder = makeAddr("queueBuilder");
+        vm.prank(playerA);
+        builderFees.approveBuilder(builder, 50, false);
+        vm.prank(playerA);
+        uint256 orderA = ticketing.buyTicketsWithBuilder{value: 9.64 ether}(8, 2, builder, 50, false);
+        vm.prank(playerB);
+        uint256 orderB = ticketing.buyTickets{value: 4.8 ether}(4, 2);
+        vm.prank(playerA);
+        ticketing.buyTickets{value: 1.2 ether}(1, 1);
+
+        RoundConfiguration memory nextConfiguration = _configuration(5);
+        nextConfiguration.ticketPrice = 2 ether;
+        stateHarness.setNextRoundConfiguration(nextConfiguration);
+        _acceptRandomness(1);
+        finalization.finalizeLottery(1);
+
+        TicketQueueView memory queue = views.ticketQueue();
+        assertEq(queue.activeGeneration, 2);
+        assertEq(queue.invalidatedTicketRefundWeth, 8 ether);
+        assertEq(queue.invalidatedBuilderRefundEth, 0.03 ether);
+        assertEq(views.round(2).ticketCount, 0);
+        (uint256 refundWeth, uint256 refundEth, bool claimed) = views.ticketOrderRefund(orderA);
+        assertEq(refundWeth, 6 ether);
+        assertEq(refundEth, 0.03 ether);
+        assertFalse(claimed);
+
+        vm.prank(playerA);
+        ticketing.claimTicketOrderRefund(orderA, playerA, playerA);
+        vm.prank(playerB);
+        ticketing.claimTicketOrderRefund(orderB, playerB, address(0));
+        assertEq(weth.balanceOf(playerA), 6 ether);
+        assertEq(weth.balanceOf(playerB), 2 ether);
+        assertEq(playerA.balance, 89.19 ether);
+        queue = views.ticketQueue();
+        assertEq(queue.invalidatedTicketRefundWeth, 0);
+        assertEq(queue.invalidatedBuilderRefundEth, 0);
+    }
+
+    function test_ExpirationRefundsAllocatedTrancheAndCarriesOrderRemainder() public {
+        vm.prank(playerA);
+        uint256 orderA = ticketing.buyTickets{value: 8 * (TICKET_PRICE + OPERATIONS_FEE)}(8, 2);
+        vm.prank(playerB);
+        ticketing.buyTickets{value: 3 * (TICKET_PRICE + OPERATIONS_FEE)}(3, 3);
+
+        vm.roll(block.number + views.round(1).config.vrfTimeoutBlocks + 1);
+        finalization.expireLottery(1);
+
+        assertEq(views.playerTickets(2, playerA), 2);
+        assertEq(views.ticketOrder(orderA).remainingTickets, 4);
+        vm.prank(playerA);
+        (uint256 refunded,) = finalization.claimExpiredRoundRefund(1, playerA, address(0));
+        assertEq(refunded, 2 ether);
+        assertEq(weth.balanceOf(playerA), 2 ether);
+    }
+
     function test_OperationalSpendingReopensTicketFeeHeadroomAfterRollover() public {
         _sellOut();
         _acceptRandomness(1);
@@ -220,7 +315,7 @@ contract LotteryFinalizationTest is Test {
 
         assertEq(operations.operationsReserve(), 0.4 ether);
         vm.prank(playerA);
-        ticketing.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        ticketing.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
 
         assertEq(operations.operationsReserve(), 0.6 ether);
         assertEq(address(diamond).balance, 1 ether);
@@ -240,7 +335,7 @@ contract LotteryFinalizationTest is Test {
         assertEq(operations.operationsReserve(), 0.4 ether);
         uint256 treasuryBefore = weth.balanceOf(treasury);
         vm.prank(playerA);
-        ticketing.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        ticketing.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
 
         assertEq(operations.operationsReserve(), 0.4 ether);
         assertEq(address(diamond).balance, 0.8 ether);
@@ -299,9 +394,9 @@ contract LotteryFinalizationTest is Test {
         vm.prank(playerA);
         builderFees.approveBuilder(builder, 50, false);
         vm.prank(playerA);
-        ticketing.buyTicketsWithBuilder{value: 2.405 ether}(2, builder, 25, false);
+        ticketing.buyTicketsWithBuilder{value: 2.405 ether}(2, 2, builder, 25, false);
         vm.prank(playerB);
-        ticketing.buyTickets{value: 3.6 ether}(3);
+        ticketing.buyTickets{value: 3.6 ether}(3, 3);
 
         vm.roll(block.number + views.round(1).config.vrfTimeoutBlocks + 1);
         finalization.expireLottery(1);
@@ -446,15 +541,19 @@ contract LotteryFinalizationTest is Test {
 
     function _sellOut() private {
         vm.prank(playerA);
-        ticketing.buyTickets{value: 2 * (TICKET_PRICE + OPERATIONS_FEE)}(2);
+        ticketing.buyTickets{value: 2 * (TICKET_PRICE + OPERATIONS_FEE)}(2, 2);
         vm.prank(playerB);
-        ticketing.buyTickets{value: 3 * (TICKET_PRICE + OPERATIONS_FEE)}(3);
+        ticketing.buyTickets{value: 3 * (TICKET_PRICE + OPERATIONS_FEE)}(3, 3);
         assertEq(uint8(views.round(1).status), uint8(RoundStatus.Closed));
     }
 
     function _acceptRandomness(uint256 word) private {
+        _acceptRandomnessFor(1, word);
+    }
+
+    function _acceptRandomnessFor(uint256 roundId, uint256 word) private {
         vm.prank(requester);
-        uint256 requestId = randomness.requestRandomness(1);
+        uint256 requestId = randomness.requestRandomness(roundId);
         uint256[] memory words = new uint256[](1);
         words[0] = word;
         wrapper.fulfill(requestId, words);
@@ -503,11 +602,12 @@ contract LotteryFinalizationTest is Test {
     }
 
     function _ticketSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](4);
+        selectors = new bytes4[](5);
         selectors[0] = LotteryTicketFacet.buyTickets.selector;
         selectors[1] = LotteryTicketFacet.ticketQuote.selector;
         selectors[2] = LotteryTicketFacet.buyTicketsWithBuilder.selector;
         selectors[3] = LotteryTicketFacet.builderTicketQuote.selector;
+        selectors[4] = LotteryTicketFacet.claimTicketOrderRefund.selector;
     }
 
     function _vrfSelectors() private pure returns (bytes4[] memory selectors) {
@@ -526,7 +626,7 @@ contract LotteryFinalizationTest is Test {
     }
 
     function _viewSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](10);
+        selectors = new bytes4[](13);
         selectors[0] = LotteryViewFacet.currentRoundId.selector;
         selectors[1] = LotteryViewFacet.round.selector;
         selectors[2] = LotteryViewFacet.remainingTickets.selector;
@@ -537,6 +637,9 @@ contract LotteryFinalizationTest is Test {
         selectors[7] = LotteryViewFacet.playerRewardEntitlement.selector;
         selectors[8] = LotteryViewFacet.requestRecord.selector;
         selectors[9] = LotteryViewFacet.expiredRoundRefund.selector;
+        selectors[10] = LotteryViewFacet.ticketQueue.selector;
+        selectors[11] = LotteryViewFacet.ticketOrder.selector;
+        selectors[12] = LotteryViewFacet.ticketOrderRefund.selector;
     }
 
     function _operationsSelectors() private pure returns (bytes4[] memory selectors) {
@@ -549,12 +652,13 @@ contract LotteryFinalizationTest is Test {
     }
 
     function _harnessSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](5);
+        selectors = new bytes4[](6);
         selectors[0] = LotteryFinalizationStateHarness.initializeLotteryState.selector;
         selectors[1] = LotteryFinalizationStateHarness.setNextRoundConfiguration.selector;
         selectors[2] = LotteryFinalizationStateHarness.setToken.selector;
         selectors[3] = LotteryFinalizationStateHarness.setWeth.selector;
         selectors[4] = LotteryFinalizationStateHarness.aggregateLiabilities.selector;
+        selectors[5] = LotteryFinalizationStateHarness.setOperationsCap.selector;
     }
 
     function _builderSelectors() private pure returns (bytes4[] memory selectors) {

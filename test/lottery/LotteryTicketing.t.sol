@@ -21,6 +21,7 @@ import {IERC173} from "../../src/interfaces/diamond/IERC173.sol";
 import {ICrotto} from "../../src/interfaces/ICrotto.sol";
 import {ICrottoGovernance} from "../../src/interfaces/ICrottoGovernance.sol";
 import {CrottoConstants} from "../../src/libraries/CrottoConstants.sol";
+import {LibTicketQueue} from "../../src/libraries/LibTicketQueue.sol";
 import {LibBuybackStorage} from "../../src/libraries/storage/LibBuybackStorage.sol";
 import {LibGovernanceStorage} from "../../src/libraries/storage/LibGovernanceStorage.sol";
 import {LibLotteryStorage} from "../../src/libraries/storage/LibLotteryStorage.sol";
@@ -205,9 +206,11 @@ contract LotteryTicketingTest is Test {
     function test_PurchaseWrapsAndRoutesEveryAccountingClassExactly() public {
         uint256 requiredPayment = TICKET_PRICE * 2 + OPERATIONS_FEE * 2;
         vm.expectEmit(true, true, false, true, address(diamond));
-        emit ICrotto.TicketsPurchased(1, player, 2, 0, 2, 202, 0.02 ether, 0, 20, true);
+        emit ICrotto.TicketOrderSubmitted(
+            1, player, 1, keccak256(abi.encode(views.round(1).config)), 2, 2, 202, 0.02 ether, 0
+        );
         vm.prank(player);
-        lottery.buyTickets{value: requiredPayment}(2);
+        lottery.buyTickets{value: requiredPayment}(2, 2);
 
         Round memory storedRound = views.round(1);
         RoundSettlement memory settlement = views.roundSettlement(1);
@@ -286,15 +289,18 @@ contract LotteryTicketingTest is Test {
         assertEq(weth.balanceOf(address(diamond)), 1_010);
 
         vm.prank(player);
-        vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.RoundNotOpen.selector, 1, RoundStatus.Closed));
-        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        uint256 queuedOrderId = lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
+        assertGt(queuedOrderId, 0);
+        assertEq(views.round(1).ticketCount, TICKET_TARGET);
     }
 
     function test_PurchaseCrossingCapRetainsHeadroomAndRoutesOverflowToTreasury() public {
         _buy(player, 4);
 
         vm.expectEmit(true, true, false, true, address(diamond));
-        emit ICrotto.TicketsPurchased(1, player, 2, 4, 6, 202, 0.02 ether, 0.01 ether, 20, true);
+        emit ICrotto.TicketOrderSubmitted(
+            2, player, 1, keccak256(abi.encode(views.round(1).config)), 2, 2, 202, 0.02 ether, 0
+        );
         _buy(player, 2);
 
         assertEq(stateView.operationsReserve(), 0.05 ether);
@@ -317,29 +323,25 @@ contract LotteryTicketingTest is Test {
     }
 
     function test_TicketQuoteMatchesExactRequiredPayment() public view {
-        (uint256 ticketPriceEth, uint256 operationsFeeEth, uint256 totalEth) = ticketing.ticketQuote(1, 3);
+        (uint256 ticketPriceEth, uint256 operationsFeeEth, uint256 totalEth) = ticketing.ticketQuote(1, 3, 3);
         assertEq(ticketPriceEth, 303);
         assertEq(operationsFeeEth, 0.03 ether);
         assertEq(totalEth, 303 + 0.03 ether);
     }
 
-    function test_RevertWhen_QuantityIsZeroOrExceedsRemaining() public {
+    function test_RevertWhen_OrderQuantitiesAreInvalid() public {
         vm.prank(player);
-        vm.expectRevert(LotteryTicketFacet.InvalidTicketQuantity.selector);
-        lottery.buyTickets(0);
+        vm.expectRevert(abi.encodeWithSelector(LibTicketQueue.InvalidTicketOrderQuantity.selector, 0, 0));
+        lottery.buyTickets(0, 0);
 
         vm.prank(player);
-        vm.expectRevert(
-            abi.encodeWithSelector(LotteryTicketFacet.TicketQuantityExceedsRemaining.selector, 11, TICKET_TARGET)
-        );
-        lottery.buyTickets(11);
+        vm.expectRevert(abi.encodeWithSelector(LibTicketQueue.InvalidTicketOrderQuantity.selector, 10, 11));
+        lottery.buyTickets(10, 11);
 
-        vm.expectRevert(LotteryTicketFacet.InvalidTicketQuantity.selector);
-        ticketing.ticketQuote(1, 0);
-        vm.expectRevert(
-            abi.encodeWithSelector(LotteryTicketFacet.TicketQuantityExceedsRemaining.selector, 11, TICKET_TARGET)
-        );
-        ticketing.ticketQuote(1, 11);
+        vm.expectRevert(abi.encodeWithSelector(LibTicketQueue.InvalidTicketOrderQuantity.selector, 0, 0));
+        ticketing.ticketQuote(1, 0, 0);
+        vm.expectRevert(abi.encodeWithSelector(LibTicketQueue.InvalidTicketOrderQuantity.selector, 10, 11));
+        ticketing.ticketQuote(1, 10, 11);
     }
 
     function test_RevertWhen_PaymentIsNotExactWithoutChangingState() public {
@@ -350,7 +352,7 @@ contract LotteryTicketingTest is Test {
                 LotteryTicketFacet.IncorrectTicketPayment.selector, requiredPayment, requiredPayment - 1
             )
         );
-        lottery.buyTickets{value: requiredPayment - 1}(1);
+        lottery.buyTickets{value: requiredPayment - 1}(1, 1);
 
         vm.prank(player);
         vm.expectRevert(
@@ -358,7 +360,7 @@ contract LotteryTicketingTest is Test {
                 LotteryTicketFacet.IncorrectTicketPayment.selector, requiredPayment, requiredPayment + 1
             )
         );
-        lottery.buyTickets{value: requiredPayment + 1}(1);
+        lottery.buyTickets{value: requiredPayment + 1}(1, 1);
 
         assertEq(views.round(1).ticketCount, 0);
         assertEq(address(diamond).balance, 0);
@@ -376,14 +378,14 @@ contract LotteryTicketingTest is Test {
         vm.expectRevert(
             abi.encodeWithSelector(CrottoFacet.ActionPaused.selector, CrottoConstants.PAUSE_TICKET_PURCHASES)
         );
-        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
     }
 
     function test_RevertWhen_RoundQuoteDoesNotExist() public {
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.UnknownRound.selector, 0));
-        ticketing.ticketQuote(0, 1);
+        ticketing.ticketQuote(0, 1, 1);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.UnknownRound.selector, 2));
-        ticketing.ticketQuote(2, 1);
+        ticketing.ticketQuote(2, 1, 1);
     }
 
     function test_RevertWhen_TicketPurchasePrecedesRoundInitialization() public {
@@ -395,7 +397,7 @@ contract LotteryTicketingTest is Test {
         CrottoDiamond uninitializedDiamond = new CrottoDiamond(address(this), cuts, address(0), bytes(""));
 
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.UnknownRound.selector, 0));
-        LotteryTicketFacet(address(uninitializedDiamond)).buyTickets(1);
+        LotteryTicketFacet(address(uninitializedDiamond)).buyTickets(1, 1);
     }
 
     function testFuzz_PrePolPurchaseAllocationConservesWrappedValue(uint256 quantity, bool activeNfts) public {
@@ -434,7 +436,7 @@ contract LotteryTicketingTest is Test {
 
         vm.prank(player);
         vm.expectRevert(abi.encodeWithSelector(LotteryTicketFacet.UnexpectedWethDeposit.selector, TICKET_PRICE, 100));
-        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
 
         _assertPurchaseStateUnchanged(address(malformedWeth));
     }
@@ -444,7 +446,7 @@ contract LotteryTicketingTest is Test {
         stateView.setWeth(address(malformedWeth));
 
         vm.prank(player);
-        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
 
         assertEq(views.round(1).ticketCount, 1);
         assertEq(views.roundSettlement(1).treasuryWeth, 11);
@@ -462,7 +464,7 @@ contract LotteryTicketingTest is Test {
 
         vm.prank(player);
         vm.expectRevert(bytes("transfer rejected"));
-        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1);
+        lottery.buyTickets{value: TICKET_PRICE + OPERATIONS_FEE}(1, 1);
 
         Round memory roundAfter = views.round(1);
         assertEq(roundAfter.ticketCount, roundBefore.ticketCount);
@@ -476,9 +478,9 @@ contract LotteryTicketingTest is Test {
     }
 
     function _buy(address buyer, uint256 quantity) private {
-        (,, uint256 requiredPayment) = ticketing.ticketQuote(1, quantity);
+        (,, uint256 requiredPayment) = ticketing.ticketQuote(1, quantity, quantity);
         vm.prank(buyer);
-        lottery.buyTickets{value: requiredPayment}(quantity);
+        lottery.buyTickets{value: requiredPayment}(quantity, quantity);
     }
 
     function _assertPurchaseStateUnchanged(address wethAddress) private view {
@@ -590,15 +592,16 @@ contract LotteryTicketingTest is Test {
     }
 
     function _ticketSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](4);
+        selectors = new bytes4[](5);
         selectors[0] = LotteryTicketFacet.buyTickets.selector;
         selectors[1] = LotteryTicketFacet.buyTicketsWithBuilder.selector;
         selectors[2] = LotteryTicketFacet.ticketQuote.selector;
         selectors[3] = LotteryTicketFacet.builderTicketQuote.selector;
+        selectors[4] = LotteryTicketFacet.claimTicketOrderRefund.selector;
     }
 
     function _viewSelectors() private pure returns (bytes4[] memory selectors) {
-        selectors = new bytes4[](13);
+        selectors = new bytes4[](16);
         selectors[0] = LotteryViewFacet.currentRoundId.selector;
         selectors[1] = LotteryViewFacet.round.selector;
         selectors[2] = LotteryViewFacet.remainingTickets.selector;
@@ -612,6 +615,9 @@ contract LotteryTicketingTest is Test {
         selectors[10] = LotteryViewFacet.roundSettlement.selector;
         selectors[11] = LotteryViewFacet.expiredRoundRefund.selector;
         selectors[12] = LotteryViewFacet.protocolAccounting.selector;
+        selectors[13] = LotteryViewFacet.ticketQueue.selector;
+        selectors[14] = LotteryViewFacet.ticketOrder.selector;
+        selectors[15] = LotteryViewFacet.ticketOrderRefund.selector;
     }
 
     function _stateSelectors() private pure returns (bytes4[] memory selectors) {

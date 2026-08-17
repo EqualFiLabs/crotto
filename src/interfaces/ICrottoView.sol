@@ -11,7 +11,9 @@ import {
     Round,
     RoundConfiguration,
     RoundSettlement,
-    TicketBatch
+    TicketBatch,
+    TicketOrder,
+    TicketQueueView
 } from "../types/CrottoTypes.sol";
 
 /// @notice Read-only integration and indexing surface for the Crotto Diamond.
@@ -33,19 +35,29 @@ interface ICrottoView {
 
     function remainingTickets(uint256 roundId) external view returns (uint256);
 
-    function ticketQuote(uint256 roundId, uint256 quantity)
+    function ticketQuote(uint256 roundId, uint256 totalTickets, uint256 ticketsPerRound)
         external
         view
         returns (uint256 ticketPriceEth, uint256 operationsFeeEth, uint256 totalEth);
 
     function builderTicketQuote(
         uint256 roundId,
-        uint256 quantity,
+        uint256 totalTickets,
+        uint256 ticketsPerRound,
         address player,
         address builder,
         uint16 builderFeeBps,
         bool redirectTicketRewards
     ) external view returns (BuilderTicketQuote memory quote);
+
+    function ticketQueue() external view returns (TicketQueueView memory);
+
+    function ticketOrder(uint256 orderId) external view returns (TicketOrder memory);
+
+    function ticketOrderRefund(uint256 orderId)
+        external
+        view
+        returns (uint256 ticketRefundWeth, uint256 builderRefundEth, bool claimed);
 
     function ticketBatchCount(uint256 roundId) external view returns (uint256);
 
