@@ -3,7 +3,7 @@ pragma solidity 0.8.33;
 
 /// @notice Compiled selector-set commitment for the immutable Crotto release surface.
 library LibCrottoReleaseManifest {
-    uint256 internal constant FINAL_SELECTOR_COUNT = 93;
+    uint256 internal constant FINAL_SELECTOR_COUNT = 97;
     bytes32 internal constant FINAL_SELECTOR_SET_HASH =
-        0x5bd60896d911249e766883a520c5b67b1f9954499748cf1b356b367e31325585;
+        0x0fa2133f1a1cd30b7217a5233e4c65c7ffeabc371523f10229def5ab3cb7e383;
 }
